@@ -1,0 +1,67 @@
+# ---- 环境变量 / 密钥 ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ---- 依赖目录（按需保留） ----
+node_modules/
+vendor/
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# ---- 构建产物 ----
+dist/
+build/
+out/
+target/
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.class
+*.jar
+
+# ---- 日志 / 临时文件 ----
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.swp
+*~
+
+# ---- 测试覆盖率 ----
+coverage/
+htmlcov/
+.coverage
+.nyc_output/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 包管理器缓存 ----
+.pnpm-store/
+.npm-cache/
+.yarn/cache/
+.yarn/install-state.gz
+
+# ---- 编辑器 / IDE（个人配置不入库） ----
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.user
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+Desktop.ini

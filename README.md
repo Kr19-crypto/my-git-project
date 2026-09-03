@@ -1,4 +1,35 @@
-﻿# My Git Project
+# My Git Project
 
-This project was initialized with Git.
+> 多人协作初始化仓库
+
+这是一个用于团队协作的初始项目仓库。当前技术栈尚未确定，后续会在这里补充项目说明、目录结构、开发与部署方式。
+
+## 目录规划（待补充）
+
+```text
+.
+├── docs/            # 文档
+├── src/             # 源码（待定）
+├── tests/           # 测试（待定）
+└── README.md
+```
+
+> 注：以上目录仅作占位说明，实际结构根据技术栈确定后再补充。
+
+## 本地开发
+
+技术栈确定后，在此补充：
+
+1. 环境要求
+2. 安装依赖
+3. 启动开发服务
+4. 运行测试
+
+## 如何参与
+
+请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 了解协作流程。
+
+## License
+
+本项目使用 [MIT License](LICENSE)。
 
