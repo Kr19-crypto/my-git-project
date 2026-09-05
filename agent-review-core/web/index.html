@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Review Roundtable — 评审报告 UI</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #171a21;
+      --border: #262b36;
+      --text: #e6e9f0;
+      --muted: #8b93a7;
+      --accent: #4a7cff;
+      --danger: #e5484d;
+      --warn: #f5a524;
+      --ok: #30a46c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 16px 80px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    h1 { font-size: 22px; margin: 0; }
+    .sub { color: var(--muted); font-size: 13px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .btn {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .btn:hover { border-color: var(--accent); }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: white; }
+    input[type=file] { display: none; }
+    .meta { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 8px; color: var(--muted); font-size: 13px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-top: 12px;
+    }
+    .card h2 { margin: 0 0 10px; font-size: 16px; }
+    .card ul { margin: 0; padding-left: 20px; }
+    .card li { margin: 6px 0; line-height: 1.6; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; margin-right: 6px; }
+    .tag.blocking { background: rgba(229,72,77,.15); color: var(--danger); }
+    .tag.suggestion { background: rgba(74,124,255,.15); color: var(--accent); }
+    .tag.risk { background: rgba(245,165,36,.15); color: var(--warn); }
+    .tag.action { background: rgba(48,164,108,.15); color: var(--ok); }
+    .summary { font-size: 15px; line-height: 1.7; }
+    textarea {
+      width: 100%;
+      min-height: 180px;
+      background: #0b0d12;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      resize: vertical;
+    }
+    .empty { color: var(--muted); text-align: center; padding: 60px 0; }
+    .hidden { display: none; }
+    #demo-hint { color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>🪑 Agent Review Roundtable</h1>
+        <div class="sub">多 Agent 圆桌评审报告查看器</div>
+      </div>
+      <div class="actions">
+        <label class="btn" for="file-input">📂 打开 review.json</label>
+        <input id="file-input" type="file" accept=".json,application/json" />
+        <button class="btn" id="demo-btn">载入示例</button>
+      </div>
+    </header>
+
+    <div id="meta" class="meta hidden"></div>
+
+    <div id="empty" class="empty">
+      <div style="font-size:40px">📄</div>
+      <p>打开评审 JSON 文件或点击「载入示例」</p>
+      <p id="demo-hint">示例文件：samples/aurora-context.review.json</p>
+    </div>
+
+    <div id="content" class="hidden">
+      <div class="card">
+        <h2>📌 Summary</h2>
+        <div class="summary" id="summary"></div>
+      </div>
+
+      <div class="card">
+        <h2><span class="tag blocking">Blocking</span>必须修复</h2>
+        <ul id="blocking"></ul>
+      </div>
+
+      <div class="card">
+        <h2><span class="tag suggestion">Suggestions</span>改进建议</h2>
+        <ul id="suggestions"></ul>
+      </div>
+
+      <div class="card">
+        <h2><span class="tag risk">Risks</span>风险</h2>
+        <ul id="risks"></ul>
+      </div>
+
+      <div class="card">
+        <h2><span class="tag action">Action Items</span>行动项</h2>
+        <ol id="actions"></ol>
+      </div>
+
+        <div class="card" id="transcript-card" style="display:none">
+          <h2>💬 圆桌讨论过程</h2>
+          <div id="transcript"></div>
+        </div>
+
+
+      <div class="card">
+        <h2>↩️ 回灌到开发会话</h2>
+        <p style="color:var(--muted);margin-top:0">复制下面这段指令，粘贴到你的开发会话/Agent 中继续执行。</p>
+        <textarea id="backfeed" readonly></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+          <button class="btn primary" id="copy-btn">📋 复制回灌指令</button>
+          <label style="display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px">
+            <input type="checkbox" id="include-blocking" checked /> 包含 Blocking
+          </label>
+          <label style="display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13px">
+            <input type="checkbox" id="include-summary" checked /> 包含 Summary
+          </label>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentReview = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    function buildBackfeed() {
+      if (!currentReview) return '';
+      const includeBlocking = $('include-blocking').checked;
+      const includeSummary = $('include-summary').checked;
+      const lines = [];
+      lines.push('# 下一步开发指令（基于评审 Action Items）');
+      lines.push('');
+      if (includeSummary && currentReview.summary) {
+        lines.push('## 评审结论');
+        lines.push(currentReview.summary);
+        lines.push('');
+      }
+      if (includeBlocking && currentReview.blocking && currentReview.blocking.length) {
+        lines.push('## 必须修复项（参考）');
+        currentReview.blocking.forEach((item) => lines.push('- ' + item));
+        lines.push('');
+      }
+      if (currentReview.action_items && currentReview.action_items.length) {
+        lines.push('## 请按以下行动项继续执行');
+        currentReview.action_items.forEach((item, index) => lines.push((index + 1) + '. ' + item));
+      } else {
+        lines.push('（没有可回灌的行动项）');
+      }
+      lines.push('');
+      lines.push('请逐步处理以上行动项，并在完成后简要说明改动与验证结果。');
+      return lines.join('\n');
+    }
+
+    function renderReview(review) {
+      currentReview = review;
+      $('empty').classList.add('hidden');
+      $('content').classList.remove('hidden');
+      $('meta').classList.remove('hidden');
+
+      const metaParts = [];
+      if (review.source) metaParts.push('Source: ' + review.source);
+      if (review.usage) {
+        metaParts.push('Tokens: ' + review.usage.totalTokens.toLocaleString());
+      }
+      metaParts.push('Truncated: ' + (review.truncated ? 'true' : 'false'));
+      $('meta').textContent = metaParts.join('  ·  ');
+
+      $('summary').textContent = review.summary || '（未生成总结）';
+      renderList('blocking', review.blocking || []);
+      renderList('suggestions', review.suggestions || []);
+      renderList('risks', review.risks || []);
+      renderList('actions', review.action_items || []);
+      renderTranscript(review.transcript || []);
+      $('backfeed').value = buildBackfeed();
+    }
+
+    function renderTranscript(transcript) {
+      const container = $('transcript');
+      container.innerHTML = '';
+      if (!transcript || !transcript.length) {
+        $('transcript-card').style.display = 'none';
+        return;
+      }
+      $('transcript-card').style.display = '';
+      transcript.forEach((speech) => {
+        const block = document.createElement('div');
+        block.style.cssText = 'border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;';
+        const head = document.createElement('div');
+        head.style.cssText = 'font-size:13px;color:var(--muted);margin-bottom:6px;';
+        head.textContent = `${speech.roleName} · Round ${speech.round}`;
+        const body = document.createElement('div');
+        body.style.cssText = 'white-space:pre-wrap;line-height:1.6;font-size:14px;';
+        body.textContent = speech.content || '';
+        block.appendChild(head);
+        block.appendChild(body);
+        container.appendChild(block);
+      });
+    }
+
+    function renderList(id, items) {
+      const ul = $(id);
+      ul.innerHTML = '';
+      if (!items.length) {
+        const li = document.createElement('li');
+        li.textContent = '无';
+        ul.appendChild(li);
+        return;
+      }
+      items.forEach((item) => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        ul.appendChild(li);
+      });
+    }
+
+    $('file-input').addEventListener('change', async (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+      try {
+        const review = JSON.parse(await file.text());
+        renderReview(review);
+      } catch (error) {
+        alert('无法解析 JSON：' + error.message);
+      }
+      event.target.value = '';
+    });
+
+    $('demo-btn').addEventListener('click', async () => {
+      try {
+        const resp = await fetch('../samples/aurora-context.review.json');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const review = await resp.json();
+        renderReview(review);
+      } catch (error) {
+        alert('无法加载示例：' + error.message + '\n请通过「打开 review.json」手动选择文件。');
+      }
+    });
+
+    $('copy-btn').addEventListener('click', async () => {
+      const text = $('backfeed').value;
+      try {
+        await navigator.clipboard.writeText(text);
+        $('copy-btn').textContent = '✅ 已复制';
+        setTimeout(() => { $('copy-btn').textContent = '📋 复制回灌指令'; }, 1200);
+      } catch {
+        $('backfeed').select();
+        document.execCommand('copy');
+        $('copy-btn').textContent = '✅ 已复制';
+        setTimeout(() => { $('copy-btn').textContent = '📋 复制回灌指令'; }, 1200);
+      }
+    });
+
+    ['include-blocking', 'include-summary'].forEach((id) => {
+      $(id).addEventListener('change', () => {
+        $('backfeed').value = buildBackfeed();
+      });
+    });
+  </script>
+</body>
+</html>

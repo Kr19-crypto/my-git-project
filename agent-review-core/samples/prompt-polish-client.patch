@@ -1,0 +1,145 @@
+diff --git a/prompt-polish-client.js b/prompt-polish-client.js
+index e69de29..2461409 100644
+--- a/prompt-polish-client.js
++++ b/prompt-polish-client.js
+@@ -0,0 +1,139 @@
++window.__ModuleLoader__.load({
++	id: "dsh-prompt-polish",
++	factory: (require) => {
++		var module = { exports: {} };
++		var exports = module.exports;
++		Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
++		let react = require("react");
++		let react_jsx_runtime = require("react/jsx-runtime");
++		//#region src/client/index.tsx
++		/**
++		* dsh-prompt-polish — browser (client) half.
++		*
++		* Registers a ✨ "Prompt 润色" button on the conversation.input.right slot
++		* (right end of the input toolbar, before the send button). On click it reads
++		* the current draft, POSTs it to /dsh-prompt-polish/polish, and writes the
++		* polished result back into the input box via setDraft (no auto-send; the user
++		* reviews and sends manually).
++		*
++		* CSS is self-contained: a single <style> tag is injected once at registration
++		* time, so the bundle carries no .module.css dependency and builds cleanly with
++		* a plain tsdown browser config (no DSH clientBundle preset required).
++		*/
++		const PLUGIN = "dsh-prompt-polish";
++		const STYLE_ID = "dsh-prompt-polish-style";
++		const CSS = [
++			"#dsh-prompt-polish-style .pp-wrap{display:inline-flex;align-items:center;gap:4px}",
++			"#dsh-prompt-polish-style .pp-btn{display:inline-flex;align-items:center;gap:4px;height:28px;",
++			"padding:0 8px;border:1px solid rgba(128,128,128,.32);border-radius:6px;",
++			"background:transparent;color:inherit;font-size:12px;cursor:pointer;white-space:nowrap;",
++			"transition:background .15s ease,border-color .15s ease}",
++			"#dsh-prompt-polish-style .pp-btn:hover:not(:disabled){background:rgba(128,128,128,.12);border-color:#4a7cff}",
++			"#dsh-prompt-polish-style .pp-btn:disabled{opacity:.5;cursor:not-allowed}",
++			"#dsh-prompt-polish-style .pp-spin{width:12px;height:12px;border:2px solid rgba(128,128,128,.35)",
++			";border-top-color:transparent;border-radius:50%;animation:ppSpin .7s linear infinite;display:inline-block}",
++			"#dsh-prompt-polish-style .pp-icon{font-size:14px;line-height:1}",
++			"#dsh-prompt-polish-style .pp-err{font-size:11px;color:#e5484d;margin-left:6px;max-width:220px;",
++			"overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
++			"@keyframes ppSpin{to{transform:rotate(360deg)}}"
++		].join("");
++		function ensureStyle() {
++			if (typeof document === "undefined") return;
++			if (document.getElementById(STYLE_ID) !== null) return;
++			const tag = document.createElement("style");
++			tag.id = STYLE_ID;
++			tag.dataset.plugin = PLUGIN;
++			tag.textContent = CSS;
++			document.head.appendChild(tag);
++		}
++		const name = PLUGIN;
++		const inject = ["slots"];
++		function apply(ctx) {
++			ensureStyle();
++			ctx.slots.inject("conversation.input.right", () => ctx.slots.register({
++				id: PLUGIN,
++				name: "conversation.input.right",
++				order: 500,
++				label: () => "Prompt 润色"
++			}, (props) => /* @__PURE__ */ (0, react_jsx_runtime.jsx)(BoostButton, {
++				useInput: props.useInput,
++				inputActions: props.inputActions
++			})));
++		}
++		function BoostButton({ useInput, inputActions }) {
++			const draft = useInput((state) => state.draft);
++			const [busy, setBusy] = (0, react.useState)(false);
++			const [error, setError] = (0, react.useState)(null);
++			const alive = (0, react.useRef)(true);
++			(0, react.useEffect)(() => {
++				alive.current = true;
++				return () => {
++					alive.current = false;
++				};
++			}, []);
++			const text = (draft ?? "").trim();
++			const disabled = busy || inputActions === void 0 || text.length === 0;
++			const onPolish = (0, react.useCallback)(async () => {
++				if (busy || inputActions === void 0 || text.length === 0) return;
++				setBusy(true);
++				setError(null);
++				try {
++					const resp = await fetch("/dsh-prompt-polish/polish", {
++						method: "POST",
++						headers: { "content-type": "application/json" },
++						body: JSON.stringify({ text })
++					});
++					const data = await resp.json();
++					if (resp.ok && data.ok === true && typeof data.text === "string" && data.text.length > 0) {
++						inputActions.setDraft(data.text);
++						if (data.truncated) setError("润色结果较长，已写入（部分截断）");
++					} else if (data.error) setError(String(data.error));
++					else setError("润色失败");
++				} catch (e) {
++					setError(e instanceof Error ? e.message : String(e));
++				} finally {
++					if (alive.current) setBusy(false);
++				}
++			}, [
++				busy,
++				inputActions,
++				text
++			]);
++			return /* @__PURE__ */ (0, react_jsx_runtime.jsxs)("div", {
++				className: "pp-wrap",
++				children: [/* @__PURE__ */ (0, react_jsx_runtime.jsxs)("button", {
++					type: "button",
++					className: "pp-btn",
++					disabled,
++					onClick: () => {
++						onPolish();
++					},
++					title: "将当前输入润色为专业提示词",
++					"aria-label": "Prompt 润色",
++					children: [busy ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
++						className: "pp-spin",
++						"aria-hidden": "true"
++					}) : /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
++						className: "pp-icon",
++						"aria-hidden": "true",
++						children: "✨"
++					}), /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
++						className: "pp-text",
++						children: busy ? " 润色中…" : " 润色"
++					})]
++				}), error !== null ? /* @__PURE__ */ (0, react_jsx_runtime.jsx)("span", {
++					className: "pp-err",
++					role: "status",
++					children: error
++				}) : null]
++			});
++		}
++		//#endregion
++		exports.apply = apply;
++		exports.inject = inject;
++		exports.name = name;
++		return module.exports;
++	}
++});
++
++//# sourceMappingURL=client.js.map
+\ No newline at end of file

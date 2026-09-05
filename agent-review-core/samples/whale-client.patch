@@ -1,0 +1,81 @@
+diff --git a/lib/client.js b/lib/client.js
+index 48ac27e..aaea61b 100644
+--- a/lib/client.js
++++ b/lib/client.js
+@@ -624,6 +624,19 @@
+       const MUTE_KEY = 'whale-on-desk:muted'
+       const HIDE_KEY = 'whale-on-desk:hidden'
+       const SIZE_KEY = 'whale-on-desk:size'
++      const AMBIENT_KEY = 'dsh.ambient.background'
++      const AMBIENT_AURORA = 'aurora'
++      const AMBIENT_WHALE = 'whale-aquarium'
++      const readAmbient = () => {
++        try {
++          const v = localStorage.getItem(AMBIENT_KEY)
++          return v === AMBIENT_WHALE ? v : AMBIENT_AURORA
++        } catch (e) { return AMBIENT_AURORA }
++      }
++      const setAmbientMode = (mode) => {
++        try { localStorage.setItem(AMBIENT_KEY, mode) } catch (e) {}
++      }
++
+       const SIZES = [
+         { label: ZH ? '大' : 'L', width: 160 },
+         { label: ZH ? '中' : 'M', width: 120 },
+@@ -671,7 +684,7 @@
+         const [quip, setQuip] = React.useState(null)
+         const [hover, setHover] = React.useState(false)
+         const [palette, setPalette] = React.useState(null)
+-        const [aquarium, setAquarium] = React.useState(false)
++        const [aquarium, setAquarium] = React.useState(() => readAmbient() === AMBIENT_WHALE)
+         const [hearts, setHearts] = React.useState([])
+         const [size, setSize] = React.useState(() => {
+           try {
+@@ -696,6 +709,27 @@
+           try { localStorage.setItem(SIZE_KEY, String(width)) } catch (e) { /* storage unavailable: session-only */ }
+           setMenuOpen(false)
+         }
++        const enterAquarium = () => {
++          setAmbientMode(AMBIENT_WHALE)
++          setMenuOpen(false)
++          setAquarium(true)
++          window.dispatchEvent(new CustomEvent('dsh-ambient-change'))
++          setTimeout(() => location.reload(), 0)
++        }
++        const applyAuroraBackground = () => {
++          setAmbientMode(AMBIENT_AURORA)
++          setMenuOpen(false)
++          setAquarium(false)
++          window.dispatchEvent(new CustomEvent('dsh-ambient-change'))
++          setTimeout(() => location.reload(), 0)
++        }
++        const exitAquarium = () => {
++          setAmbientMode(AMBIENT_AURORA)
++          setAquarium(false)
++          window.dispatchEvent(new CustomEvent('dsh-ambient-change'))
++          setTimeout(() => location.reload(), 0)
++        }
++
+         const sizeHeight = Math.round(size * 0.6875)
+ 
+         // Idle murmurs keep the corner alive between turns.
+@@ -933,7 +967,7 @@
+ 
+         if (gone) return null
+         if (aquarium) {
+-          return h(AquariumView, { manifest, snap, scales, onExit: () => setAquarium(false) })
++          return h(AquariumView, { manifest, snap, scales, onExit: exitAquarium })
+         }
+         if (hidden) {          return h('div', {
+             title: ZH ? '双击恢复桌宠' : 'Double-click to restore the pet',
+@@ -1040,7 +1074,9 @@
+             }, (s.width === size ? '● ' : '○ ') + (ZH ? '尺寸 ' : 'Size ') + s.label)),
+             h('div', { onClick: openPalette, className: 'whale-on-desk-menu-item' }, '⌘ ' + (ZH ? '命令面板' : 'Commands')),
+             h('div', { onClick: openDesktop, className: 'whale-on-desk-menu-item' }, '🖥 ' + (ZH ? '桌面悬浮窗' : 'Desktop overlay')),
+-            h('div', { onClick: () => { setMenuOpen(false); setAquarium(true) }, className: 'whale-on-desk-menu-item' }, '🐠 ' + (ZH ? '水族馆' : 'Aquarium')),
++            h('div', { onClick: enterAquarium, className: 'whale-on-desk-menu-item', style: readAmbient() === AMBIENT_WHALE ? { color: '#BFE3FF' } : undefined }, '🐠 ' + (ZH ? '水族馆（背景）' : 'Aquarium background')),
++            h('div', { onClick: applyAuroraBackground, className: 'whale-on-desk-menu-item', style: readAmbient() === AMBIENT_AURORA ? { color: '#BFE3FF' } : undefined }, '🖼 ' + (ZH ? 'Aurora 壁纸' : 'Aurora wallpaper')),
++
+             pets && pets.pets.length > 1
+               ? pets.pets.map((p) => h('div', {
+                   key: p,

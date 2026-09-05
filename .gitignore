@@ -65,3 +65,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Agent Review Roundtable local artifacts
+agent-review-core/dist/
+agent-review-core/.env
+agent-review-core/*.tgz
+agent-review-core/test/*.smoke.mjs
+agent-review-core/call-agent-review-tool.mjs

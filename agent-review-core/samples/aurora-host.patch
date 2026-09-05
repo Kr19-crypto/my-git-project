@@ -1,0 +1,343 @@
+diff --git a/src/host.js b/src/host.js
+index 448cbcd..aba5c88 100644
+--- a/src/host.js
++++ b/src/host.js
+@@ -6,13 +6,22 @@
+ //
+ // 使用前请修改下方 CONFIG。
+ 
++import path from 'node:path'
++import { fileURLToPath } from 'node:url'
++
++// 插件包自身目录（仓库根下的 packages/we-scene 源码随包分发，默认自解析）
++const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url))
++
+ const CONFIG = {
+   // Wallpaper Engine 工坊内容目录（按你的 Steam 库位置修改）
+   workshopDir: 'D:\\steam\\steamapps\\workshop\\content\\431960',
+   // 插件工作目录（缓存清单；需可写，不可写时仅丢失跨重启记忆）
+-  vaultDir: 'D:\\aurora-wallpaper',
+-  // we-scene 渲染器源码目录（用于打包 /dyn/aurora-lib.js，浏览器场景渲染）
+-  weSceneSrc: 'D:\\杂活\\aurora-wallpaper\\packages\\we-scene\\src',
++  // 注意：静态宿主插件的 fs 服务受 host 组合沙箱约束（workspace-write），
++  //       只能写 workspace（D:\WORK AREA）内路径，故 vault 放 workspace 下。
++  vaultDir: 'D:\\WORK AREA\\.aurora-vault',
++  // we-scene 渲染器源码目录（用于打包 /dyn/aurora-lib.js，浏览器场景渲染）；
++  // 默认取本包自带的 packages/we-scene/src，可改为其他路径。
++  weSceneSrc: path.join(PLUGIN_DIR, '..', 'packages', 'we-scene', 'src'),
+   // 官方 util/noise.tex（带 mip 链：sway 等效果靠 LINEAR_MIPMAP_LINEAR 平滑位移场）
+   weNoiseTex: 'D:\\steam\\steamapps\\common\\wallpaper_engine\\assets\\materials\\util\\noise.tex',
+   // WE 安装目录的 shader 目录（效果 shader 与公共头文件；运行时读取，不分发）。
+@@ -299,8 +308,9 @@ const SCENE_GLUE = `import * as lib from '/dyn/aurora-lib.js'
+   setInterval(poll, 3000)
+ })()`
+ 
+-return {
+-  apply(ctx) {
++export const inject = ['webServer', 'fs']
++
++export function apply(ctx) {
+     const webServer = ctx.get('webServer')
+     const fs = ctx.get('fs')
+     const sandboxPolicy = ctx.get('sandboxPolicy')
+@@ -314,17 +324,53 @@ return {
+       let current = 0
+       let cached = null
+       let libSource = ''
++      // 隐藏列表：file 路径集合，持久化到 manifest；列表与扫描都跳过隐藏项。
++      const hidden = new Set()
+       async function persist() {
+-        if (sandboxPolicy === undefined) return false
+         try {
+-          const policy = sandboxPolicy.resolve({})
+           const mt = await fs.resolve(MANIFEST)
+-          await fs.writeText(mt, JSON.stringify({ videos }, null, 2), undefined, undefined, policy)
++          await fs.writeText(mt, JSON.stringify({ videos, hidden: [...hidden] }, null, 2), undefined, undefined)
+           return true
+         } catch (e) { return false }
+       }
++      function isHidden(v) {
++        return hidden.has(v.file)
++      }
++      function visibleVideos() {
++        return videos.filter((v) => !isHidden(v))
++      }
++      async function setHidden(file, hide) {
++        const target = typeof file === 'string' ? file : ''
++        if (hide) hidden.add(target)
++        else hidden.delete(target)
++        const alive = new Set(videos.map((v) => v.file))
++        if (alive.has(target)) {
++          // 该壁纸仍在磁盘，直接应用隐藏/显示
++          if (hide && videos[current] && videos[current].file === target) {
++            const visible = visibleVideos()
++            current = visible.length > 0 ? videos.findIndex((v) => v.file === visible[0].file) : 0
++          }
++          renumber()
++          syncRoutes()
++        }
++        await persist()
++      }
++      // 每条壁纸文件注册的路由 disposer，key 为 v.file；syncRoutes() 整体重装。
++      const routeByFile = new Map()
++      function registerFor(v) {
++        const ds = [serveVideo(v), serveScenePkg(v)].filter(Boolean)
++        routeByFile.set(v.file, ds)
++      }
++      function disposeAllRoutes() {
++        for (const ds of routeByFile.values()) for (const d of ds) { try { d() } catch (e) {} }
++        routeByFile.clear()
++      }
++      function syncRoutes() {
++        disposeAllRoutes()
++        for (const v of videos) registerFor(v)
++      }
+       function serveVideo(v) {
+-        disposers.push(webServer.register({
++        return webServer.register({
+           kind: 'exact',
+           path: '/dyn/aurora-video/' + v.n + '.mp4',
+           handler: async (req, res) => {
+@@ -376,12 +422,12 @@ return {
+               res.end()
+             }
+           },
+-        }))
++        })
+       }
+       function serveScenePkg(v) {
+-        if (!v.isScene) return
++        if (!v.isScene) return null
+         const pkgPath = WORKSHOP + '\\' + v.folder + '\\scene.pkg'
+-        disposers.push(webServer.register({
++        return webServer.register({
+           kind: 'exact',
+           path: '/dyn/aurora-scene/' + v.n + '.pkg',
+           handler: async (req, res) => {
+@@ -395,7 +441,7 @@ return {
+               res.end()
+             }
+           },
+-        }))
++        })
+       }
+       async function readProjectInfo(subPath, subName) {
+         try {
+@@ -413,10 +459,13 @@ return {
+       }
+       async function autoSync(rootPath) {
+         const added = []
++        const removed = []
+         const errors = []
+         try {
+           const t = await fs.resolve(rootPath)
+           const subs = await fs.listDir(t, undefined)
++          const alive = new Set()
++          const prefix = rootPath.replace(/[\\/]+$/, '') + '\\'
+           for (const s of subs) {
+             const subName = s.name || String(s)
+             try {
+@@ -444,33 +493,47 @@ return {
+                 if (img) { full = subPath + '\\' + img.name; kind = kindOf(img.name) }
+               }
+               if (!full) continue
++              alive.add(full)
++              if (hidden.has(full)) continue
+               if (videos.some((v) => v.file === full)) continue
+-              videos.push({ n: 0, file: full, title: info.title, kind, folder: subName, isScene: info.type === 'scene' })
++              videos.push({ n: 0, file: full, title: info.title, kind, folder: subName, isScene: info.type === 'scene', root: rootPath })
+               added.push(info.title)
+             } catch (e2) {}
+           }
++          // 删除：属于该目录、但本次扫描已不存在的壁纸（磁盘删除同步）
++          const before = videos.length
++          videos = videos.filter((v) => {
++            if (typeof v.file !== 'string' || !v.file.toLowerCase().startsWith(prefix.toLowerCase())) return true
++            if (alive.has(v.file)) return true
++            removed.push(v.title)
++            return false
++          })
++          if (videos.length !== before) {
++            if (videos.length === 0) current = 0
++            else if (current > videos.length - 1) current = videos.length - 1
++          }
+         } catch (e) {
+           errors.push(rootPath + ': ' + String(e && e.message || e))
+         }
+-        return { added, errors }
++        return { added, removed, errors }
+       }
+       function renumber() {
+-        videos = videos.map((v, i) => ({ n: i, file: v.file, title: v.title, kind: v.kind || 'video', folder: v.folder, isScene: !!v.isScene }))
++        videos = videos.map((v, i) => ({ n: i, file: v.file, title: v.title, kind: v.kind || 'video', folder: v.folder, isScene: !!v.isScene, root: v.root }))
+       }
+       const boot = (async () => {
+         try {
+           const mt = await fs.resolve(MANIFEST)
+           const manifest = JSON.parse(await fs.readText(mt))
+           if (manifest && Array.isArray(manifest.videos) && manifest.videos.length > 0) {
+-            videos = manifest.videos.map((v) => ({ n: 0, file: v.file, title: v.title, kind: v.kind || 'video', folder: v.folder, isScene: !!v.isScene }))
++            videos = manifest.videos.map((v) => ({ n: 0, file: v.file, title: v.title, kind: v.kind || 'video', folder: v.folder, isScene: !!v.isScene, root: v.root }))
++          }
++          if (manifest && Array.isArray(manifest.hidden)) {
++            for (const f of manifest.hidden) if (typeof f === 'string') hidden.add(f)
+           }
+         } catch (e) { videos = [] }
+         await autoSync(WORKSHOP)
+         renumber()
+-        for (const v of videos) {
+-          serveVideo(v)
+-          serveScenePkg(v)
+-        }
++        syncRoutes()
+         try {
+           const parts = []
+           for (const rel of LIB_FILES) {
+@@ -536,10 +599,12 @@ return {
+           path: '/dyn/aurora-list.json',
+           handler: async (req, res) => {
+             try {
++              const visible = visibleVideos()
+               res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+               res.end(JSON.stringify({
+-                index: current,
+-                videos: videos.map((v, i) => ({ title: v.title, url: '/dyn/aurora-video/' + i + '.mp4', k: v.kind || 'video', s: !!v.isScene })),
++                index: Math.min(current, Math.max(0, visible.length - 1)),
++                hiddenCount: hidden.size,
++                videos: visible.map((v, i) => ({ title: v.title, url: '/dyn/aurora-video/' + i + '.mp4', k: v.kind || 'video', s: !!v.isScene, file: v.file })),
+               }))
+             } catch (err) { res.writeHead(500); res.end() }
+           },
+@@ -550,22 +615,65 @@ return {
+           handler: async (req, res) => {
+             try {
+               res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+-              res.end(JSON.stringify({ index: current, total: videos.length }))
++              res.end(JSON.stringify({ index: current, total: visibleVideos().length }))
+             } catch (err) { res.writeHead(500); res.end() }
+           },
+         }))
++        disposers.push(webServer.register({
++          kind: 'exact',
++          path: '/dyn/aurora-hide',
++          handler: async (req, res) => {
++            try {
++              const raw = queryParam(req.url, 'file')
++              if (raw !== null && raw !== '') {
++                await setHidden(raw, true)
++                res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
++                res.end(JSON.stringify({ ok: true, hidden: [...hidden] }))
++                return
++              }
++              res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
++              res.end(JSON.stringify({ ok: false, error: 'missing file' }))
++            } catch (err) { res.writeHead(500); res.end(JSON.stringify({ ok: false, error: String(err && err.message || err) })) }
++          },
++        }))
++        disposers.push(webServer.register({
++          kind: 'exact',
++          path: '/dyn/aurora-unhide',
++          handler: async (req, res) => {
++            try {
++              const raw = queryParam(req.url, 'file')
++              if (raw !== null && raw !== '') {
++                await setHidden(raw, false)
++              } else {
++                // 不带 file 参数：恢复全部隐藏项
++                hidden.clear()
++                renumber()
++                syncRoutes()
++                await persist()
++              }
++              res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
++              res.end(JSON.stringify({ ok: true, hidden: [...hidden] }))
++            } catch (err) { res.writeHead(500); res.end(JSON.stringify({ ok: false, error: String(err && err.message || err) })) }
++          },
++        }))
+         disposers.push(webServer.register({
+           kind: 'exact',
+           path: '/dyn/aurora-set',
+           handler: async (req, res) => {
+             try {
++              const visible = visibleVideos()
+               const raw = queryParam(req.url, 'index')
+               if (raw !== null) {
+                 const n = parseInt(raw, 10)
+-                if (!isNaN(n) && videos.length > 0) current = ((n % videos.length) + videos.length) % videos.length
++                if (!isNaN(n) && visible.length > 0) {
++                  // visible[n] 是可见列表第 n 项；把 current 指向它在 videos 里的真实位置
++                  const target = visible[((n % visible.length) + visible.length) % visible.length]
++                  const idx = videos.findIndex((v) => v.file === target.file)
++                  if (idx >= 0) current = idx
++                }
+               }
+               res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+-              res.end(JSON.stringify({ index: current }))
++              res.end(JSON.stringify({ index: visible.findIndex((v) => v.file === videos[current]?.file) }))
+             } catch (err) { res.writeHead(500); res.end() }
+           },
+         }))
+@@ -573,36 +681,34 @@ return {
+           const body = /<body(?:\s[^>]*)?>/i.exec(html)
+           if (body === null) return html
+           const at = body.index + body[0].length
+-          const injection = '<video id="aurora-bg" autoplay muted loop playsinline></video><canvas id="aurora-scene" width="1920" height="1080"></canvas><style>#aurora-bg,#aurora-scene{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none;transition:opacity .5s;transform:translateZ(0);backface-visibility:hidden;will-change:transform}#aurora-scene{display:none}#aurora-bg.aurora-img{animation:auroraImgDrift 70s ease-in-out infinite alternate}@keyframes auroraImgDrift{0%{transform:translateZ(0) scale(1.02)}50%{transform:translateZ(0) scale(1.08)}100%{transform:translateZ(0) scale(1.04)}}@media (prefers-reduced-motion:reduce){#aurora-bg,#aurora-scene{display:none}}</style><script type="module">' + SCENE_GLUE + '</scr' + 'ipt>'
++          const injection = '<video id="aurora-bg" data-ambient="aurora" autoplay muted loop playsinline></video><canvas id="aurora-scene" data-ambient="aurora" width="1920" height="1080"></canvas><style data-ambient="aurora">#aurora-bg,#aurora-scene{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none;transition:opacity .5s;transform:translateZ(0);backface-visibility:hidden;will-change:transform}#aurora-scene{display:none}#aurora-bg.aurora-img{animation:auroraImgDrift 70s ease-in-out infinite alternate}@keyframes auroraImgDrift{0%{transform:translateZ(0) scale(1.02)}50%{transform:translateZ(0) scale(1.08)}100%{transform:translateZ(0) scale(1.04)}}@media (prefers-reduced-motion:reduce){#aurora-bg,#aurora-scene{display:none}}</style><script type="module" data-ambient="aurora">' + SCENE_GLUE + '</scr' + 'ipt>'
+           return html.slice(0, at) + injection + html.slice(at)
+         }))
+       })()
+-      disposers.push(harness.handle('aurora-get', async () => ({ index: current, total: videos.length })))
+-      disposers.push(harness.handle('aurora-list', async () => ({
+-        index: current,
+-        videos: videos.map((v, i) => ({ n: i, title: v.title, kind: v.kind || 'video', isScene: !!v.isScene })),
+-      })))
+-      disposers.push(harness.handle('aurora-set', async (args) => {
+-        const n = ((typeof args.index === 'number' ? args.index : 0) % videos.length + videos.length) % videos.length
+-        current = n
+-        return { index: n }
+-      }))
+-      disposers.push(harness.handle('aurora-scan', async (args) => {
+-        const before = videos.length
+-        let result
+-        if (args && typeof args.path === 'string' && args.path) result = await autoSync(args.path)
+-        else result = await autoSync(WORKSHOP)
+-        if (videos.length !== before) {
+-          renumber()
+-          for (let i = before; i < videos.length; i++) {
+-            serveVideo(videos[i])
+-            serveScenePkg(videos[i])
+-          }
+-          await persist()
+-        }
+-        return result
+-      }))
+-      return () => { for (const dispose of disposers) dispose() }
++        disposers.push(webServer.register({
++          kind: 'exact',
++          path: '/dyn/aurora-scan',
++          handler: async (req, res) => {
++            try {
++              const raw = queryParam(req.url, 'path')
++              const before = videos.length
++              let result
++              if (raw !== null && raw !== '') result = await autoSync(raw)
++              else result = await autoSync(WORKSHOP)
++              const changed = result.added.length > 0 || result.removed.length > 0
++              if (changed || videos.length !== before) {
++                renumber()
++                syncRoutes()
++                await persist()
++              }
++              res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
++              res.end(JSON.stringify(result))
++            } catch (err) {
++              res.writeHead(500)
++              res.end(JSON.stringify({ added: [], removed: [], errors: ['scan 错误: ' + String(err && err.message || err)] }))
++            }
++          },
++        }))
++      return () => { for (const dispose of disposers) dispose(); disposeAllRoutes() }
+     })
+-  },
+-}
++  }

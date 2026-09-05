@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent Review Roundtable — Live Progress</title>
+  <style>
+    body {
+      margin: 0;
+      background: #0f1115;
+      color: #e6e9f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 24px;
+    }
+    h1 { font-size: 20px; }
+    .status { color: #8b93a7; font-size: 14px; }
+    .event {
+      border: 1px solid #262b36;
+      background: #171a21;
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-top: 10px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .event .time { color: #8b93a7; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>🪑 Agent Review Roundtable Live</h1>
+  <div class="status" id="status">等待评审事件…</div>
+  <div id="events"></div>
+  <script>
+    const eventsEl = document.getElementById('events');
+    const statusEl = document.getElementById('status');
+
+    function append(text) {
+      const div = document.createElement('div');
+      div.className = 'event';
+      div.textContent = text;
+      eventsEl.prepend(div);
+    }
+
+    const es = new EventSource('/plugins/agent-review-roundtable/events');
+    es.onopen = () => { statusEl.textContent = '已连接实时进度'; };
+    es.onmessage = (e) => {
+      let data;
+      try { data = JSON.parse(e.data); } catch { return; }
+      statusEl.textContent = data.type || 'event';
+      append((data.time ? new Date(data.time).toLocaleTimeString() + ' ' : '') + (data.text || JSON.stringify(data)));
+    };
+    es.onerror = () => { statusEl.textContent = '连接断开/等待下个任务'; };
+  </script>
+</body>
+</html>

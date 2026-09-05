@@ -1,0 +1,6 @@
+# DSH bundle patch: inserts Agent Review Roundtable into the profile layer stack.
+- insert:
+    - id: agent-review-roundtable
+      name: 'agent-review-roundtable'
+      config:
+        mock: false

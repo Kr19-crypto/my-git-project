@@ -1,0 +1,899 @@
+diff --git a/package.json b/package.json
+index fa1252d..8d00001 100644
+--- a/package.json
++++ b/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "dsh-aurora-wallpaper",
+-  "version": "0.1.0",
+-  "description": "Wallpaper Engine 壁纸作为 DeepSeek Harness 网页界面的动态背景（动态 Cordis 插件）",
++  "version": "0.2.0",
++  "description": "Wallpaper Engine 壁纸作为 DeepSeek Harness 网页界面的动态背景（静态 bundle 双半插件）",
+   "license": "MIT",
+   "keywords": [
+     "deepseek-harness",
+@@ -11,7 +11,32 @@
+     "live-wallpaper",
+     "background"
+   ],
++  "type": "module",
++  "main": "./src/host.js",
++  "exports": {
++    ".": "./src/host.js",
++    "./client": "./src/client.js",
++    "./package.json": "./package.json"
++  },
++  "dsh": {
++    "bundle": {
++      "patch": "./cordis.patch.yml"
++    },
++    "client": {
++      "platform": "web",
++      "inject": [
++        "@deepseek-ai/dsh-client-runtime",
++        "@deepseek-ai/dsh-client-ui-settings"
++      ]
++    }
++  },
++  "peerDependencies": {
++    "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.6",
++    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.0-rc.6"
++  },
+   "files": [
+-    "src"
++    "src",
++    "cordis.patch.yml",
++    "README.md"
+   ]
+ }
+diff --git a/src/client.js b/src/client.js
+index 4851ab2..d4a6217 100644
+--- a/src/client.js
++++ b/src/client.js
+@@ -1,46 +1,124 @@
+-// DSH Aurora Wallpaper —— 客户端半
++// DSH Aurora Wallpaper —— 客户端半（静态 bundle 格式）
+ // 职责：注册主题（token 覆盖）与设置页 UI（壁纸列表/主题/性能档位/扫描）。
+ // 性能档位：均衡 60fps / 省电 30fps / 低配 30fps+降采样，失焦暂停开关（localStorage 'aurora-perf'，宿主半读取生效）。
++// 说明：静态 bundle 客户端无动态 runner 的自由变量，React 经 require('react')、
++//       theme/slots 经 ctx 服务、CSS 手动插入 style 标签、宿主调用走 /dyn/ HTTP 路由。
+ 
+-return {
+-  apply(ctx) {
+-    const theme = ctx.get('theme')
+-    const slots = ctx.get('slots')
+-    if (theme === undefined || slots === undefined) return
+-    const disposeDark = theme.register({
+-      id: 'aurora-dark',
+-      colorScheme: 'dark',
+-      tokens: {
+-        '--dsw-alias-bg-base': '#1515152E',
+-        '--dsw-alias-bg-layer-1': '#1A1A1A40',
+-        '--dsw-alias-bg-layer-2': '#22222266',
+-        '--dsw-alias-bg-overlay': '#1E1E1EF0',
+-        '--dsw-alias-border-l1': '#38383880',
+-        '--dsw-alias-border-l2': '#4A4A4A8C',
+-        '--dsw-specific-sidebar-fill': '#12121273',
+-        '--dsw-specific-input-major': '#121212CC',
+-        '--dsw-specific-tip': '#121212B3',
+-        '--dsw-alias-button-ghost-active-fill': 'rgba(34, 34, 40, 0.55)',
+-      },
+-    })
+-    const disposeLight = theme.register({
+-      id: 'aurora-light',
+-      colorScheme: 'light',
+-      tokens: {
+-        '--dsw-alias-bg-base': '#F5F3EF40',
+-        '--dsw-alias-bg-layer-1': '#FAF8F44D',
+-        '--dsw-alias-bg-layer-2': '#EFEBE280',
+-        '--dsw-alias-bg-overlay': '#FBF9F4EB',
+-        '--dsw-alias-border-l1': '#C9C2B173',
+-        '--dsw-alias-border-l2': '#B3AC9A8C',
+-        '--dsw-specific-sidebar-fill': '#EDEAE34D',
+-        '--dsw-specific-input-major': '#F0EEE9D9',
+-        '--dsw-specific-tip': '#F5F3EFBF',
+-        '--dsw-alias-button-ghost-active-fill': 'rgba(24, 24, 28, 0.08)',
+-      },
+-    })
+-    theme.setTheme('aurora-dark')
+-    const disposeStyles = styles.insert(`
++window.__ModuleLoader__.load({
++  id: "dsh-aurora-wallpaper",
++  factory: (require) => {
++    var module = { exports: {} };
++    var exports = module.exports;
++    var React = require("react");
++
++    var inject = ["slots", "theme"];
++
++      // Shared background-mode switch with whale-on-desk:
++      //   localStorage['dsh.ambient.background'] = 'aurora' | 'whale-aquarium'
++      var AMBIENT_KEY = 'dsh.ambient.background';
++      var AMBIENT_AURORA = 'aurora';
++      var AMBIENT_WHALE = 'whale-aquarium';
++      function readAmbient() {
++        try {
++          var v = localStorage.getItem(AMBIENT_KEY);
++          return v === AMBIENT_WHALE ? v : AMBIENT_AURORA;
++        } catch (e) { return AMBIENT_AURORA }
++      }
++      function setAmbientMode(mode) {
++        try { localStorage.setItem(AMBIENT_KEY, mode) } catch (e) {}
++        location.reload();
++      }
++      function removeAuroraBackground() {
++        document.querySelectorAll('[data-ambient="aurora"]').forEach(function (el) { el.remove() });
++      }
++
++
++    function insertStyle(css) {
++      var tag = document.createElement("style");
++      tag.dataset.plugin = "dsh-aurora-wallpaper";
++      tag.dataset.ambient = "aurora";
++      tag.textContent = css;
++      document.head.appendChild(tag);
++      return function () { tag.remove() };
++    }
++
++    function apply(ctx) {
++      var theme = ctx.theme;
++      var slots = ctx.slots;
++        // React immediately when whale-on-desk changes the shared background mode.
++        var onAmbientChange = function () { location.reload() };
++        window.addEventListener('dsh-ambient-change', onAmbientChange);
++        ctx.effect(function () {
++          return function () { window.removeEventListener('dsh-ambient-change', onAmbientChange) };
++        });
++
++        var ambientMode = readAmbient();
++        if (ambientMode === AMBIENT_WHALE) {
++          // whale-on-desk 水族馆正在接管背景：Aurora 不注入壁纸，只保留切换入口。
++          removeAuroraBackground();
++          var disposeStandby = slots.inject('settings.section', function () {
++            return slots.register(
++              { name: 'settings.section', id: 'wallpaper', order: 30, label: '壁纸背景' },
++              function () {
++                return React.createElement('div', { className: 'aurora-panel' }, [
++                  React.createElement('div', { key: 't', className: 'aurora-title' }, 'Aurora 壁纸'),
++                  React.createElement('div', { key: 's', className: 'aurora-sub' }, '当前背景由 whale-on-desk 水族馆接管，Aurora 已暂停。'),
++                  React.createElement('div', { key: 'a', className: 'aurora-actions' }, [
++                    React.createElement('button', {
++                      key: 'aurora',
++                      className: 'aurora-btn',
++                      'data-active': 'false',
++                      onClick: function () { setAmbientMode(AMBIENT_AURORA) },
++                    }, '启用 Aurora 壁纸'),
++                    React.createElement('button', {
++                      key: 'whale',
++                      className: 'aurora-btn',
++                      'data-active': 'true',
++                      disabled: true,
++                    }, '鲸鱼水族馆（当前）'),
++                  ]),
++                ]);
++              }
++            );
++          });
++          ctx.effect(function () { return function () { disposeStandby() } });
++          return;
++        }
++
++      var disposeDark = theme.register({
++        id: 'aurora-dark',
++        colorScheme: 'dark',
++        tokens: {
++          '--dsw-alias-bg-base': '#1515152E',
++          '--dsw-alias-bg-layer-1': '#1A1A1A40',
++          '--dsw-alias-bg-layer-2': '#22222266',
++          '--dsw-alias-bg-overlay': '#1E1E1EF0',
++          '--dsw-alias-border-l1': '#38383880',
++          '--dsw-alias-border-l2': '#4A4A4A8C',
++          '--dsw-specific-sidebar-fill': '#12121273',
++          '--dsw-specific-input-major': '#121212CC',
++          '--dsw-specific-tip': '#121212B3',
++          '--dsw-alias-button-ghost-active-fill': 'rgba(34, 34, 40, 0.55)',
++        },
++      })
++      var disposeLight = theme.register({
++        id: 'aurora-light',
++        colorScheme: 'light',
++        tokens: {
++          '--dsw-alias-bg-base': '#F5F3EF40',
++          '--dsw-alias-bg-layer-1': '#FAF8F44D',
++          '--dsw-alias-bg-layer-2': '#EFEBE280',
++          '--dsw-alias-bg-overlay': '#FBF9F4EB',
++          '--dsw-alias-border-l1': '#C9C2B173',
++          '--dsw-alias-border-l2': '#B3AC9A8C',
++          '--dsw-specific-sidebar-fill': '#EDEAE34D',
++          '--dsw-specific-input-major': '#F0EEE9D9',
++          '--dsw-specific-tip': '#F5F3EFBF',
++          '--dsw-alias-button-ghost-active-fill': 'rgba(24, 24, 28, 0.08)',
++        },
++      })
++      theme.setTheme('aurora-dark')
++      var disposeStyles = insertStyle(`
+ html { background: #DCD9D2; }
+ html:has(body[data-ds-dark-theme]) { background: #0E0E10; }
+ body { background: transparent; }
+@@ -96,6 +174,10 @@ body[data-ds-dark-theme]::after {
+ .aurora-item{appearance:none;cursor:pointer;font:inherit;font-size:13px;text-align:left;color:var(--dsw-alias-label-secondary);background:transparent;border:1px solid transparent;border-radius:8px;padding:7px 10px}
+ .aurora-item:hover{background:var(--dsw-alias-interactive-bg-hover)}
+ .aurora-item[data-active=true]{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover-solid);border-color:var(--dsw-alias-border-l1)}
++.aurora-item-row{display:flex;gap:6px;align-items:center}
++.aurora-item-row .aurora-item{flex:1;min-width:0}
++.aurora-mini{appearance:none;cursor:pointer;font:inherit;font-size:11px;color:var(--dsw-alias-label-tertiary);background:transparent;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;padding:3px 8px;white-space:nowrap}
++.aurora-mini:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
+ .aurora-err{color:var(--dsw-alias-state-error-primary);font-size:12px}
+ @keyframes dshAuroraDriftA {
+   0% { transform: translate3d(-2%, -1.5%, 0) scale(1.02); }
+@@ -106,132 +188,201 @@ body[data-ds-dark-theme]::after {
+   body::before { animation: none; }
+ }
+ `)
+-    const disposeSection = slots.inject('settings.section', () => slots.register(
+-      { name: 'settings.section', id: 'wallpaper', order: 30, label: '壁纸背景' },
+-      (props) => React.createElement(WallpaperSection, { close: props.close }),
+-    ))
+-    ctx.effect(() => () => {
+-      disposeSection()
+-      disposeStyles()
+-      disposeLight()
+-      disposeDark()
+-    })
+-    function WallpaperSection(props) {
+-      const [list, setList] = React.useState(null)
+-      const [index, setIndex] = React.useState(0)
+-      const [scan, setScan] = React.useState(null)
+-      const [busy, setBusy] = React.useState(false)
+-      const [err, setErr] = React.useState('')
+-      const [pref, setPref] = React.useState('')
+-      const [perfMode, setPerfMode] = React.useState('balanced')
+-      const [pauseOnBlur, setPauseOnBlur] = React.useState(true)
+-      const THEMES = [
+-        { id: 'aurora-dark', label: '动态壁纸·暗' },
+-        { id: 'aurora-light', label: '动态壁纸·亮' },
+-        { id: 'dark', label: '内置暗色' },
+-        { id: 'light', label: '内置亮色' },
+-      ]
+-      const PERF_LABELS = { balanced: '均衡 · 60fps', powersave: '省电 · 30fps', lowend: '低配 · 30fps+降采样' }
+-      React.useEffect(() => {
+-        let alive = true
+-        host.call('aurora-list', {}).then((r) => {
+-          if (!alive) return
+-          setList(r.videos || [])
+-          setIndex(r.index || 0)
+-        }).catch(() => { if (alive) setErr('读取壁纸列表失败') })
+-        const snap = theme.getTheme()
+-        if (snap && snap.preference) setPref(snap.preference)
+-        try {
+-          const p = JSON.parse(localStorage.getItem('aurora-perf') || '{}')
+-          if (p.mode) setPerfMode(p.mode)
+-          if (p.pauseOnBlur !== undefined) setPauseOnBlur(p.pauseOnBlur)
+-        } catch (e) {}
+-        return () => { alive = false }
+-      }, [])
+-      const refreshList = () => {
+-        host.call('aurora-list', {}).then((r) => {
+-          setList(r.videos || [])
+-          setIndex(r.index || 0)
+-        }).catch(() => setErr('刷新列表失败'))
+-      }
+-      const switchTheme = (id) => {
+-        theme.setTheme(id)
+-        const snap = theme.getTheme()
+-        setPref(snap.preference)
+-      }
+-      const go = (n) => {
+-        setBusy(true)
+-        host.call('aurora-set', { index: n }).then((r) => {
+-          setIndex(r.index)
+-          setBusy(false)
+-        }).catch(() => { setErr('切换失败'); setBusy(false) })
+-      }
+-      const doScan = (path) => {
+-        setBusy(true)
+-        setScan(null)
+-        host.call('aurora-scan', path ? { path: path } : {}).then((r) => {
+-          setScan(r)
+-          setBusy(false)
+-          refreshList()
+-        }).catch(() => { setErr('扫描失败'); setBusy(false) })
+-      }
+-      const pickFolder = () => {
+-        const ws = ctx.get('workspaces')
+-        if (ws === undefined) { setErr('此环境不支持文件夹选择'); return }
+-        ws.pickDirectory().then((p) => {
+-          if (p) doScan(p)
+-        }).catch(() => { setErr('无法打开文件夹选择器') })
+-      }
+-      const setPerf = (mode, pause) => {
+-        localStorage.setItem('aurora-perf', JSON.stringify({ mode: mode, pauseOnBlur: pause }))
+-        setPerfMode(mode)
+-        setPauseOnBlur(pause)
+-      }
+-      const total = list ? list.length : 0
+-      const cur = list && list[index] ? list[index] : null
+-      return React.createElement('div', { className: 'aurora-panel' }, [
+-        React.createElement('div', { key: 't', className: 'aurora-title' }, '壁纸背景视频'),
+-        React.createElement('div', { key: 'th', className: 'aurora-sub' }, '主题（外观行只支持内置三档，壁纸主题在这里切换）：'),
+-        React.createElement('div', { key: 'ta', className: 'aurora-actions' }, THEMES.map((th) => React.createElement('button', {
+-          key: th.id,
+-          className: 'aurora-btn',
+-          'data-active': String(pref === th.id),
+-          onClick: () => switchTheme(th.id),
+-        }, th.label))),
+-        React.createElement('div', { key: 'pt', className: 'aurora-sub' }, '性能（场景壁纸渲染档位，不影响画质）：'),
+-        React.createElement('div', { key: 'pa', className: 'aurora-actions' }, Object.keys(PERF_LABELS).map((m) => React.createElement('button', {
+-          key: m,
+-          className: 'aurora-btn',
+-          'data-active': String(perfMode === m),
+-          onClick: () => setPerf(m, pauseOnBlur),
+-        }, PERF_LABELS[m]))),
+-        React.createElement('div', { key: 'pb', className: 'aurora-actions' }, [
+-          React.createElement('button', {
+-            key: 'pause',
++      var disposeSection = slots.inject('settings.section', () => slots.register(
++        { name: 'settings.section', id: 'wallpaper', order: 30, label: '壁纸背景' },
++        (props) => React.createElement(WallpaperSection, { close: props.close }),
++      ))
++      ctx.effect(() => () => {
++        disposeSection()
++        disposeStyles()
++        disposeLight()
++        disposeDark()
++      })
++      function WallpaperSection(props) {
++        var listState = React.useState(null)
++        var list = listState[0]
++        var setList = listState[1]
++        var indexState = React.useState(0)
++        var index = indexState[0]
++        var setIndex = indexState[1]
++        var scanState = React.useState(null)
++        var scan = scanState[0]
++        var setScan = scanState[1]
++        var busyState = React.useState(false)
++        var busy = busyState[0]
++        var setBusy = busyState[1]
++        var errState = React.useState('')
++        var err = errState[0]
++        var setErr = errState[1]
++        var prefState = React.useState('')
++        var pref = prefState[0]
++        var setPref = prefState[1]
++        var perfModeState = React.useState('balanced')
++        var perfMode = perfModeState[0]
++        var setPerfMode = perfModeState[1]
++        var pauseOnBlurState = React.useState(true)
++        var pauseOnBlur = pauseOnBlurState[0]
++        var setPauseOnBlur = pauseOnBlurState[1]
++        var hiddenCountState = React.useState(0)
++        var hiddenCount = hiddenCountState[0]
++        var setHiddenCount = hiddenCountState[1]
++        var THEMES = [
++          { id: 'aurora-dark', label: '动态壁纸·暗' },
++          { id: 'aurora-light', label: '动态壁纸·亮' },
++          { id: 'dark', label: '内置暗色' },
++          { id: 'light', label: '内置亮色' },
++        ]
++        var PERF_LABELS = { balanced: '均衡 · 60fps', powersave: '省电 · 30fps', lowend: '低配 · 30fps+降采样' }
++        React.useEffect(function () {
++          var alive = true
++          fetch('/dyn/aurora-list.json', { cache: 'no-store' }).then(function (r) { return r.json() }).then(function (r) {
++            if (!alive) return
++            setList(r.videos || [])
++            setIndex(r.index || 0)
++            if (typeof r.hiddenCount === 'number') setHiddenCount(r.hiddenCount)
++          }).catch(function () { if (alive) setErr('读取壁纸列表失败') })
++          var snap = theme.getTheme()
++          if (snap && snap.preference) setPref(snap.preference)
++          try {
++            var p = JSON.parse(localStorage.getItem('aurora-perf') || '{}')
++            if (p.mode) setPerfMode(p.mode)
++            if (p.pauseOnBlur !== undefined) setPauseOnBlur(p.pauseOnBlur)
++          } catch (e) {}
++          return function () { alive = false }
++        }, [])
++        var refreshList = function () {
++          fetch('/dyn/aurora-list.json', { cache: 'no-store' }).then(function (r) { return r.json() }).then(function (r) {
++            setList(r.videos || [])
++            setIndex(r.index || 0)
++            if (typeof r.hiddenCount === 'number') setHiddenCount(r.hiddenCount)
++          }).catch(function () { setErr('刷新列表失败') })
++        }
++        var switchTheme = function (id) {
++          theme.setTheme(id)
++          var snap = theme.getTheme()
++          setPref(snap.preference)
++        }
++        var go = function (n) {
++          setBusy(true)
++          fetch('/dyn/aurora-set?index=' + encodeURIComponent(String(n)), { cache: 'no-store' }).then(function (r) { return r.json() }).then(function (r) {
++            setIndex(r.index)
++            setBusy(false)
++          }).catch(function () { setErr('切换失败'); setBusy(false) })
++        }
++        var doScan = function (path) {
++          setBusy(true)
++          setScan(null)
++          var url = '/dyn/aurora-scan' + (path ? '?path=' + encodeURIComponent(path) : '')
++          fetch(url, { cache: 'no-store' }).then(function (r) { return r.json() }).then(function (r) {
++            setScan(r)
++            setBusy(false)
++            refreshList()
++          }).catch(function () { setErr('扫描失败'); setBusy(false) })
++        }
++        var pickFolder = function () {
++          var ws = ctx.get('workspaces')
++          if (ws === undefined) { setErr('此环境不支持文件夹选择'); return }
++          ws.pickDirectory().then(function (p) {
++            if (p) doScan(p)
++          }).catch(function () { setErr('无法打开文件夹选择器') })
++        }
++        var hideOne = function (v) {
++          if (!v || !v.file) return
++          setBusy(true)
++          fetch('/dyn/aurora-hide?file=' + encodeURIComponent(v.file), { cache: 'no-store' }).then(function (r) { return r.json() }).then(function (r) {
++            setBusy(false)
++            if (r && r.ok) {
++              setHiddenCount(r.hidden ? r.hidden.length : 0)
++              refreshList()
++              setScan({ added: [], removed: [], errors: [], hidden: ['已隐藏：' + v.title] })
++            } else { setErr('隐藏失败：' + ((r && r.error) || '未知错误')) }
++          }).catch(function () { setErr('隐藏失败'); setBusy(false) })
++        }
++        var unhideAll = function () {
++          setBusy(true)
++          fetch('/dyn/aurora-unhide', { cache: 'no-store' }).then(function (r) { return r.json() }).then(function (r) {
++            setBusy(false)
++            if (r && r.ok) {
++              setHiddenCount(0)
++              refreshList()
++              setScan({ added: [], removed: [], errors: [], hidden: ['已恢复全部隐藏壁纸'] })
++            } else { setErr('恢复失败：' + ((r && r.error) || '未知错误')) }
++          }).catch(function () { setErr('恢复失败'); setBusy(false) })
++        }
++        var setPerf = function (mode, pause) {
++          localStorage.setItem('aurora-perf', JSON.stringify({ mode: mode, pauseOnBlur: pause }))
++          setPerfMode(mode)
++          setPauseOnBlur(pause)
++        }
++        var total = list ? list.length : 0
++        var cur = list && list[index] ? list[index] : null
++        return React.createElement('div', { className: 'aurora-panel' }, [
++            React.createElement('div', { key: 'am', className: 'aurora-sub' }, '背景模式（与 whale-on-desk 水族馆互斥）：'),
++            React.createElement('div', { key: 'amb', className: 'aurora-actions' }, [
++              React.createElement('button', {
++                key: 'aurora',
++                className: 'aurora-btn',
++                'data-active': 'true',
++                disabled: true,
++              }, 'Aurora 壁纸（当前）'),
++              React.createElement('button', {
++                key: 'whale',
++                className: 'aurora-btn',
++                'data-active': 'false',
++                onClick: function () { setAmbientMode(AMBIENT_WHALE) },
++              }, '切换到鲸鱼水族馆'),
++            ]),
++          React.createElement('div', { key: 't', className: 'aurora-title' }, '壁纸背景视频'),
++          React.createElement('div', { key: 'th', className: 'aurora-sub' }, '主题（外观行只支持内置三档，壁纸主题在这里切换）：'),
++          React.createElement('div', { key: 'ta', className: 'aurora-actions' }, THEMES.map(function (th) { return React.createElement('button', {
++            key: th.id,
++            className: 'aurora-btn',
++            'data-active': String(pref === th.id),
++            onClick: function () { switchTheme(th.id) },
++          }, th.label) })),
++          React.createElement('div', { key: 'pt', className: 'aurora-sub' }, '性能（场景壁纸渲染档位，不影响画质）：'),
++          React.createElement('div', { key: 'pa', className: 'aurora-actions' }, Object.keys(PERF_LABELS).map(function (m) { return React.createElement('button', {
++            key: m,
+             className: 'aurora-btn',
+-            'data-active': String(pauseOnBlur),
+-            onClick: () => setPerf(perfMode, !pauseOnBlur),
+-          }, '失焦暂停：' + (pauseOnBlur ? '开' : '关')),
+-        ]),
+-        React.createElement('div', { key: 'c', className: 'aurora-sub' }, cur ? ('当前：' + cur.title + '（' + (index + 1) + '/' + total + '）') : (list && list.length === 0 ? '未在壁纸引擎目录中发现壁纸。' : '加载中…')),
+-        React.createElement('div', { key: 'a', className: 'aurora-actions' }, [
+-          React.createElement('button', { key: 'p', className: 'aurora-btn', disabled: busy || !list || list.length === 0, onClick: () => go(index - 1) }, '上一张'),
+-          React.createElement('button', { key: 'n', className: 'aurora-btn', disabled: busy || !list || list.length === 0, onClick: () => go(index + 1) }, '下一张'),
+-        ]),
+-        React.createElement('ul', { key: 'l', className: 'aurora-list' }, (list || []).map((v, i) => React.createElement('li', { key: String(v.n) + ':' + String(i) },
+-          React.createElement('button', { className: 'aurora-item', 'data-active': String(i === index), onClick: () => go(i) }, v.title),
+-        ))),
+-        React.createElement('div', { key: 's', className: 'aurora-actions' }, [
+-          React.createElement('button', { key: 'scan', className: 'aurora-btn', disabled: busy, onClick: () => doScan(null) }, '同步壁纸引擎目录'),
+-          React.createElement('button', { key: 'pick', className: 'aurora-btn', disabled: busy, onClick: pickFolder }, '从文件夹选择'),
+-        ]),
+-        scan && React.createElement('div', { key: 'r' }, [
+-          scan.added && scan.added.length > 0 && React.createElement('div', { className: 'aurora-sub' }, '已自动加入 ' + scan.added.length + ' 个：' + scan.added.join('、')),
+-          (!scan.added || scan.added.length === 0) && React.createElement('div', { className: 'aurora-sub' }, '没有新壁纸，列表已是最新。'),
+-          scan.errors && scan.errors.length > 0 && React.createElement('div', { className: 'aurora-err' }, '部分目录不可读：' + scan.errors.join('；')),
+-        ]),
+-        err && React.createElement('div', { key: 'e', className: 'aurora-err' }, err),
+-      ])
++            'data-active': String(perfMode === m),
++            onClick: function () { setPerf(m, pauseOnBlur) },
++          }, PERF_LABELS[m]) })),
++          React.createElement('div', { key: 'pb', className: 'aurora-actions' }, [
++            React.createElement('button', {
++              key: 'pause',
++              className: 'aurora-btn',
++              'data-active': String(pauseOnBlur),
++              onClick: function () { setPerf(perfMode, !pauseOnBlur) },
++            }, '失焦暂停：' + (pauseOnBlur ? '开' : '关')),
++          ]),
++          React.createElement('div', { key: 'c', className: 'aurora-sub' }, cur ? ('当前：' + cur.title + '（' + (index + 1) + '/' + total + '）') : (list && list.length === 0 ? '未在壁纸引擎目录中发现壁纸。' : '加载中…')),
++          React.createElement('div', { key: 'a', className: 'aurora-actions' }, [
++            React.createElement('button', { key: 'p', className: 'aurora-btn', disabled: busy || !list || list.length === 0, onClick: function () { go(index - 1) } }, '上一张'),
++            React.createElement('button', { key: 'n', className: 'aurora-btn', disabled: busy || !list || list.length === 0, onClick: function () { go(index + 1) } }, '下一张'),
++          ]),
++          React.createElement('ul', { key: 'l', className: 'aurora-list' }, (list || []).map(function (v, i) { return React.createElement('li', { key: String(i), className: 'aurora-item-row' },
++            React.createElement('button', { className: 'aurora-item', 'data-active': String(i === index), onClick: function () { go(i) } }, v.title),
++            React.createElement('button', { className: 'aurora-mini', title: '从列表移除（不删除文件）', onClick: function () { hideOne(v) } }, '隐藏'),
++          ) })),
++          React.createElement('div', { key: 's', className: 'aurora-actions' }, [
++            React.createElement('button', { key: 'scan', className: 'aurora-btn', disabled: busy, onClick: function () { doScan(null) } }, '同步壁纸引擎目录'),
++            React.createElement('button', { key: 'pick', className: 'aurora-btn', disabled: busy, onClick: pickFolder }, '从文件夹选择'),
++            React.createElement('button', { key: 'unhide', className: 'aurora-btn', disabled: busy || !hiddenCount, onClick: unhideAll }, '恢复隐藏壁纸' + (hiddenCount ? '（' + hiddenCount + '）' : '')),
++          ]),
++          scan && React.createElement('div', { key: 'r' }, [
++            scan.hidden && scan.hidden.length > 0 && React.createElement('div', { className: 'aurora-sub' }, scan.hidden.join('')),
++            scan.added && scan.added.length > 0 && React.createElement('div', { className: 'aurora-sub' }, '已自动加入 ' + scan.added.length + ' 个：' + scan.added.join('、')),
++            scan.removed && scan.removed.length > 0 && React.createElement('div', { className: 'aurora-sub' }, '已移除 ' + scan.removed.length + ' 个（磁盘上已删除）：' + scan.removed.join('、')),
++            (!scan.added || scan.added.length === 0) && (!scan.removed || scan.removed.length === 0) && (!scan.hidden || scan.hidden.length === 0) && React.createElement('div', { className: 'aurora-sub' }, '没有变化，列表已是最新。'),
++            scan.errors && scan.errors.length > 0 && React.createElement('div', { className: 'aurora-err' }, '部分目录不可读：' + scan.errors.join('；')),
++          ]),
++          err && React.createElement('div', { key: 'e', className: 'aurora-err' }, err),
++        ])
++      }
+     }
++
++    exports.apply = apply;
++    exports.inject = inject;
++    return module.exports;
+   },
+-}
++});
+diff --git a/src/host.js b/src/host.js
+index 448cbcd..aba5c88 100644
+--- a/src/host.js
++++ b/src/host.js
+@@ -6,13 +6,22 @@
+ //
+ // 使用前请修改下方 CONFIG。
+ 
++import path from 'node:path'
++import { fileURLToPath } from 'node:url'
++
++// 插件包自身目录（仓库根下的 packages/we-scene 源码随包分发，默认自解析）
++const PLUGIN_DIR = path.dirname(fileURLToPath(import.meta.url))
++
+ const CONFIG = {
+   // Wallpaper Engine 工坊内容目录（按你的 Steam 库位置修改）
+   workshopDir: 'D:\\steam\\steamapps\\workshop\\content\\431960',
+   // 插件工作目录（缓存清单；需可写，不可写时仅丢失跨重启记忆）
+-  vaultDir: 'D:\\aurora-wallpaper',
+-  // we-scene 渲染器源码目录（用于打包 /dyn/aurora-lib.js，浏览器场景渲染）
+-  weSceneSrc: 'D:\\杂活\\aurora-wallpaper\\packages\\we-scene\\src',
++  // 注意：静态宿主插件的 fs 服务受 host 组合沙箱约束（workspace-write），
++  //       只能写 workspace（D:\WORK AREA）内路径，故 vault 放 workspace 下。
++  vaultDir: 'D:\\WORK AREA\\.aurora-vault',
++  // we-scene 渲染器源码目录（用于打包 /dyn/aurora-lib.js，浏览器场景渲染）；
++  // 默认取本包自带的 packages/we-scene/src，可改为其他路径。
++  weSceneSrc: path.join(PLUGIN_DIR, '..', 'packages', 'we-scene', 'src'),
+   // 官方 util/noise.tex（带 mip 链：sway 等效果靠 LINEAR_MIPMAP_LINEAR 平滑位移场）
+   weNoiseTex: 'D:\\steam\\steamapps\\common\\wallpaper_engine\\assets\\materials\\util\\noise.tex',
+   // WE 安装目录的 shader 目录（效果 shader 与公共头文件；运行时读取，不分发）。
+@@ -299,8 +308,9 @@ const SCENE_GLUE = `import * as lib from '/dyn/aurora-lib.js'
+   setInterval(poll, 3000)
+ })()`
+ 
+-return {
+-  apply(ctx) {
++export const inject = ['webServer', 'fs']
++
++export function apply(ctx) {
+     const webServer = ctx.get('webServer')
+     const fs = ctx.get('fs')
+     const sandboxPolicy = ctx.get('sandboxPolicy')
+@@ -314,17 +324,53 @@ return {
+       let current = 0
+       let cached = null
+       let libSource = ''
++      // 隐藏列表：file 路径集合，持久化到 manifest；列表与扫描都跳过隐藏项。
++      const hidden = new Set()
+       async function persist() {
+-        if (sandboxPolicy === undefined) return false
+         try {
+-          const policy = sandboxPolicy.resolve({})
+           const mt = await fs.resolve(MANIFEST)
+-          await fs.writeText(mt, JSON.stringify({ videos }, null, 2), undefined, undefined, policy)
++          await fs.writeText(mt, JSON.stringify({ videos, hidden: [...hidden] }, null, 2), undefined, undefined)
+           return true
+         } catch (e) { return false }
+       }
++      function isHidden(v) {
++        return hidden.has(v.file)
++      }
++      function visibleVideos() {
++        return videos.filter((v) => !isHidden(v))
++      }
++      async function setHidden(file, hide) {
++        const target = typeof file === 'string' ? file : ''
++        if (hide) hidden.add(target)
++        else hidden.delete(target)
++        const alive = new Set(videos.map((v) => v.file))
++        if (alive.has(target)) {
++          // 该壁纸仍在磁盘，直接应用隐藏/显示
++          if (hide && videos[current] && videos[current].file === target) {
++            const visible = visibleVideos()
++            current = visible.length > 0 ? videos.findIndex((v) => v.file === visible[0].file) : 0
++          }
++          renumber()
++          syncRoutes()
++        }
++        await persist()
++      }
++      // 每条壁纸文件注册的路由 disposer，key 为 v.file；syncRoutes() 整体重装。
++      const routeByFile = new Map()
++      function registerFor(v) {
++        const ds = [serveVideo(v), serveScenePkg(v)].filter(Boolean)
++        routeByFile.set(v.file, ds)
++      }
++      function disposeAllRoutes() {
++        for (const ds of routeByFile.values()) for (const d of ds) { try { d() } catch (e) {} }
++        routeByFile.clear()
++      }
++      function syncRoutes() {
++        disposeAllRoutes()
++        for (const v of videos) registerFor(v)
++      }
+       function serveVideo(v) {
+-        disposers.push(webServer.register({
++        return webServer.register({
+           kind: 'exact',
+           path: '/dyn/aurora-video/' + v.n + '.mp4',
+           handler: async (req, res) => {
+@@ -376,12 +422,12 @@ return {
+               res.end()
+             }
+           },
+-        }))
++        })
+       }
+       function serveScenePkg(v) {
+-        if (!v.isScene) return
++        if (!v.isScene) return null
+         const pkgPath = WORKSHOP + '\\' + v.folder + '\\scene.pkg'
+-        disposers.push(webServer.register({
++        return webServer.register({
+           kind: 'exact',
+           path: '/dyn/aurora-scene/' + v.n + '.pkg',
+           handler: async (req, res) => {
+@@ -395,7 +441,7 @@ return {
+               res.end()
+             }
+           },
+-        }))
++        })
+       }
+       async function readProjectInfo(subPath, subName) {
+         try {
+@@ -413,10 +459,13 @@ return {
+       }
+       async function autoSync(rootPath) {
+         const added = []
++        const removed = []
+         const errors = []
+         try {
+           const t = await fs.resolve(rootPath)
+           const subs = await fs.listDir(t, undefined)
++          const alive = new Set()
++          const prefix = rootPath.replace(/[\\/]+$/, '') + '\\'
+           for (const s of subs) {
+             const subName = s.name || String(s)
+             try {
+@@ -444,33 +493,47 @@ return {
+                 if (img) { full = subPath + '\\' + img.name; kind = kindOf(img.name) }
+               }
+               if (!full) continue
++              alive.add(full)
++              if (hidden.has(full)) continue
+               if (videos.some((v) => v.file === full)) continue
+-              videos.push({ n: 0, file: full, title: info.title, kind, folder: subName, isScene: info.type === 'scene' })
++              videos.push({ n: 0, file: full, title: info.title, kind, folder: subName, isScene: info.type === 'scene', root: rootPath })
+               added.push(info.title)
+             } catch (e2) {}
+           }
++          // 删除：属于该目录、但本次扫描已不存在的壁纸（磁盘删除同步）
++          const before = videos.length
++          videos = videos.filter((v) => {
++            if (typeof v.file !== 'string' || !v.file.toLowerCase().startsWith(prefix.toLowerCase())) return true
++            if (alive.has(v.file)) return true
++            removed.push(v.title)
++            return false
++          })
++          if (videos.length !== before) {
++            if (videos.length === 0) current = 0
++            else if (current > videos.length - 1) current = videos.length - 1
++          }
+         } catch (e) {
+           errors.push(rootPath + ': ' + String(e && e.message || e))
+         }
+-        return { added, errors }
++        return { added, removed, errors }
+       }
+       function renumber() {
+-        videos = videos.map((v, i) => ({ n: i, file: v.file, title: v.title, kind: v.kind || 'video', folder: v.folder, isScene: !!v.isScene }))
++        videos = videos.map((v, i) => ({ n: i, file: v.file, title: v.title, kind: v.kind || 'video', folder: v.folder, isScene: !!v.isScene, root: v.root }))
+       }
+       const boot = (async () => {
+         try {
+           const mt = await fs.resolve(MANIFEST)
+           const manifest = JSON.parse(await fs.readText(mt))
+           if (manifest && Array.isArray(manifest.videos) && manifest.videos.length > 0) {
+-            videos = manifest.videos.map((v) => ({ n: 0, file: v.file, title: v.title, kind: v.kind || 'video', folder: v.folder, isScene: !!v.isScene }))
++            videos = manifest.videos.map((v) => ({ n: 0, file: v.file, title: v.title, kind: v.kind || 'video', folder: v.folder, isScene: !!v.isScene, root: v.root }))
++          }
++          if (manifest && Array.isArray(manifest.hidden)) {
++            for (const f of manifest.hidden) if (typeof f === 'string') hidden.add(f)
+           }
+         } catch (e) { videos = [] }
+         await autoSync(WORKSHOP)
+         renumber()
+-        for (const v of videos) {
+-          serveVideo(v)
+-          serveScenePkg(v)
+-        }
++        syncRoutes()
+         try {
+           const parts = []
+           for (const rel of LIB_FILES) {
+@@ -536,10 +599,12 @@ return {
+           path: '/dyn/aurora-list.json',
+           handler: async (req, res) => {
+             try {
++              const visible = visibleVideos()
+               res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+               res.end(JSON.stringify({
+-                index: current,
+-                videos: videos.map((v, i) => ({ title: v.title, url: '/dyn/aurora-video/' + i + '.mp4', k: v.kind || 'video', s: !!v.isScene })),
++                index: Math.min(current, Math.max(0, visible.length - 1)),
++                hiddenCount: hidden.size,
++                videos: visible.map((v, i) => ({ title: v.title, url: '/dyn/aurora-video/' + i + '.mp4', k: v.kind || 'video', s: !!v.isScene, file: v.file })),
+               }))
+             } catch (err) { res.writeHead(500); res.end() }
+           },
+@@ -550,22 +615,65 @@ return {
+           handler: async (req, res) => {
+             try {
+               res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+-              res.end(JSON.stringify({ index: current, total: videos.length }))
++              res.end(JSON.stringify({ index: current, total: visibleVideos().length }))
+             } catch (err) { res.writeHead(500); res.end() }
+           },
+         }))
++        disposers.push(webServer.register({
++          kind: 'exact',
++          path: '/dyn/aurora-hide',
++          handler: async (req, res) => {
++            try {
++              const raw = queryParam(req.url, 'file')
++              if (raw !== null && raw !== '') {
++                await setHidden(raw, true)
++                res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
++                res.end(JSON.stringify({ ok: true, hidden: [...hidden] }))
++                return
++              }
++              res.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
++              res.end(JSON.stringify({ ok: false, error: 'missing file' }))
++            } catch (err) { res.writeHead(500); res.end(JSON.stringify({ ok: false, error: String(err && err.message || err) })) }
++          },
++        }))
++        disposers.push(webServer.register({
++          kind: 'exact',
++          path: '/dyn/aurora-unhide',
++          handler: async (req, res) => {
++            try {
++              const raw = queryParam(req.url, 'file')
++              if (raw !== null && raw !== '') {
++                await setHidden(raw, false)
++              } else {
++                // 不带 file 参数：恢复全部隐藏项
++                hidden.clear()
++                renumber()
++                syncRoutes()
++                await persist()
++              }
++              res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
++              res.end(JSON.stringify({ ok: true, hidden: [...hidden] }))
++            } catch (err) { res.writeHead(500); res.end(JSON.stringify({ ok: false, error: String(err && err.message || err) })) }
++          },
++        }))
+         disposers.push(webServer.register({
+           kind: 'exact',
+           path: '/dyn/aurora-set',
+           handler: async (req, res) => {
+             try {
++              const visible = visibleVideos()
+               const raw = queryParam(req.url, 'index')
+               if (raw !== null) {
+                 const n = parseInt(raw, 10)
+-                if (!isNaN(n) && videos.length > 0) current = ((n % videos.length) + videos.length) % videos.length
++                if (!isNaN(n) && visible.length > 0) {
++                  // visible[n] 是可见列表第 n 项；把 current 指向它在 videos 里的真实位置
++                  const target = visible[((n % visible.length) + visible.length) % visible.length]
++                  const idx = videos.findIndex((v) => v.file === target.file)
++                  if (idx >= 0) current = idx
++                }
+               }
+               res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+-              res.end(JSON.stringify({ index: current }))
++              res.end(JSON.stringify({ index: visible.findIndex((v) => v.file === videos[current]?.file) }))
+             } catch (err) { res.writeHead(500); res.end() }
+           },
+         }))
+@@ -573,36 +681,34 @@ return {
+           const body = /<body(?:\s[^>]*)?>/i.exec(html)
+           if (body === null) return html
+           const at = body.index + body[0].length
+-          const injection = '<video id="aurora-bg" autoplay muted loop playsinline></video><canvas id="aurora-scene" width="1920" height="1080"></canvas><style>#aurora-bg,#aurora-scene{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none;transition:opacity .5s;transform:translateZ(0);backface-visibility:hidden;will-change:transform}#aurora-scene{display:none}#aurora-bg.aurora-img{animation:auroraImgDrift 70s ease-in-out infinite alternate}@keyframes auroraImgDrift{0%{transform:translateZ(0) scale(1.02)}50%{transform:translateZ(0) scale(1.08)}100%{transform:translateZ(0) scale(1.04)}}@media (prefers-reduced-motion:reduce){#aurora-bg,#aurora-scene{display:none}}</style><script type="module">' + SCENE_GLUE + '</scr' + 'ipt>'
++          const injection = '<video id="aurora-bg" data-ambient="aurora" autoplay muted loop playsinline></video><canvas id="aurora-scene" data-ambient="aurora" width="1920" height="1080"></canvas><style data-ambient="aurora">#aurora-bg,#aurora-scene{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none;transition:opacity .5s;transform:translateZ(0);backface-visibility:hidden;will-change:transform}#aurora-scene{display:none}#aurora-bg.aurora-img{animation:auroraImgDrift 70s ease-in-out infinite alternate}@keyframes auroraImgDrift{0%{transform:translateZ(0) scale(1.02)}50%{transform:translateZ(0) scale(1.08)}100%{transform:translateZ(0) scale(1.04)}}@media (prefers-reduced-motion:reduce){#aurora-bg,#aurora-scene{display:none}}</style><script type="module" data-ambient="aurora">' + SCENE_GLUE + '</scr' + 'ipt>'
+           return html.slice(0, at) + injection + html.slice(at)
+         }))
+       })()
+-      disposers.push(harness.handle('aurora-get', async () => ({ index: current, total: videos.length })))
+-      disposers.push(harness.handle('aurora-list', async () => ({
+-        index: current,
+-        videos: videos.map((v, i) => ({ n: i, title: v.title, kind: v.kind || 'video', isScene: !!v.isScene })),
+-      })))
+-      disposers.push(harness.handle('aurora-set', async (args) => {
+-        const n = ((typeof args.index === 'number' ? args.index : 0) % videos.length + videos.length) % videos.length
+-        current = n
+-        return { index: n }
+-      }))
+-      disposers.push(harness.handle('aurora-scan', async (args) => {
+-        const before = videos.length
+-        let result
+-        if (args && typeof args.path === 'string' && args.path) result = await autoSync(args.path)
+-        else result = await autoSync(WORKSHOP)
+-        if (videos.length !== before) {
+-          renumber()
+-          for (let i = before; i < videos.length; i++) {
+-            serveVideo(videos[i])
+-            serveScenePkg(videos[i])
+-          }
+-          await persist()
+-        }
+-        return result
+-      }))
+-      return () => { for (const dispose of disposers) dispose() }
++        disposers.push(webServer.register({
++          kind: 'exact',
++          path: '/dyn/aurora-scan',
++          handler: async (req, res) => {
++            try {
++              const raw = queryParam(req.url, 'path')
++              const before = videos.length
++              let result
++              if (raw !== null && raw !== '') result = await autoSync(raw)
++              else result = await autoSync(WORKSHOP)
++              const changed = result.added.length > 0 || result.removed.length > 0
++              if (changed || videos.length !== before) {
++                renumber()
++                syncRoutes()
++                await persist()
++              }
++              res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
++              res.end(JSON.stringify(result))
++            } catch (err) {
++              res.writeHead(500)
++              res.end(JSON.stringify({ added: [], removed: [], errors: ['scan 错误: ' + String(err && err.message || err)] }))
++            }
++          },
++        }))
++      return () => { for (const dispose of disposers) dispose(); disposeAllRoutes() }
+     })
+-  },
+-}
++  }
