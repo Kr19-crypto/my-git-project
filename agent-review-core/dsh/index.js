@@ -18,6 +18,7 @@ import { getDefaultRoles } from '../dist/defaultRoles.js'
 import { applyRoleModelRouting, createConfig } from '../dist/config.js'
 import { runRoundtable } from '../dist/roundtable.js'
 import { buildActionPrompt } from '../dist/actions.js'
+import { polishPrompt } from '../dist/promptPolish.js'
 
 export const name = 'agent-review-roundtable'
 export const inject = ['tools', 'credentials', 'sessions']
@@ -76,6 +77,18 @@ export function apply(ctx) {
   void loadProjectEnv().then(() => { if (process.env.LLM_API_KEY) setupConfigured = true })
   const roleOverrides = new Map()
   const pausedChannels = new Set()
+  const resolveApiKey = async () => {
+    if (process.env.LLM_API_KEY) return process.env.LLM_API_KEY
+    if (credentials && typeof credentials.resolve === 'function') {
+      try {
+        const cred = await credentials.resolve('DEEPSEEK_API_KEY')
+        if (cred && cred.value) return String(cred.value)
+      } catch (error) {
+        // Optional; fall back to empty key so callLlm can report cleanly.
+      }
+    }
+    return ''
+  }
   // Per-channel pause waiters. Pausing/resuming one channel must never wake
   // waiters of another channel (previously one global set was woken by any
   // pause or resume, so concurrent channels could resume each other).
@@ -353,6 +366,98 @@ export function apply(ctx) {
       return finalResult
     },
   }))
+
+  ctx.tools.register(defineTool({
+    name: 'agent_review_polish_prompt',
+    description:
+      'Improve/polish a draft prompt (辅助提示词改进) before sending it to a coding agent or review session. ' +
+      'Rewrites raw text into a clearer, more actionable prompt using the configured LLM.',
+    parameters: {
+      text: { type: 'string', required: true, description: 'Raw prompt/draft text to improve.' },
+      instruction: {
+        type: 'string',
+        description: 'Optional extra instruction, e.g. "更结构化，面向 PowerShell 开发任务".',
+      },
+      context: {
+        type: 'string',
+        description: 'Optional context/constraints that should be considered.',
+      },
+    },
+    output: {
+      schema: { type: 'object', additionalProperties: true },
+      render: (_args, value) => {
+        const v = value ?? {}
+        if (v.ok !== true) {
+          return [{ type: 'text', text: v.error || 'polish failed' }]
+        }
+        const lines = []
+        const feedback = v.feedback || {}
+        if (feedback.summary || feedback.blocking?.length || feedback.suggestions?.length) {
+          lines.push('## 提示词反馈')
+          if (feedback.summary) lines.push(feedback.summary)
+          if (Array.isArray(feedback.blocking) && feedback.blocking.length) {
+            lines.push('')
+            lines.push('### Blocking')
+            feedback.blocking.forEach((item) => lines.push(`- ${item}`))
+          }
+          if (Array.isArray(feedback.suggestions) && feedback.suggestions.length) {
+            lines.push('')
+            lines.push('### Suggestions')
+            feedback.suggestions.forEach((item) => lines.push(`- ${item}`))
+          }
+          if (Array.isArray(feedback.risks) && feedback.risks.length) {
+            lines.push('')
+            lines.push('### Risks')
+            feedback.risks.forEach((item) => lines.push(`- ${item}`))
+          }
+          if (Array.isArray(feedback.action_items) && feedback.action_items.length) {
+            lines.push('')
+            lines.push('### Action Items')
+            feedback.action_items.forEach((item, i) => lines.push(`${i + 1}. ${item}`))
+          }
+          lines.push('')
+        }
+        lines.push('## Polished Prompt')
+        lines.push('')
+        lines.push(v.text || '')
+        if (v.usage) {
+          lines.push('')
+          lines.push(`Usage: ${v.usage.totalTokens} tokens`)
+        }
+        return [{ type: 'text', text: lines.join('\n') }]
+      },
+    },
+    execute: async (args) => {
+      await loadProjectEnv()
+      const text = String(args.text || '').trim()
+      if (!text) return { ok: false, error: 'text is required' }
+      const apiKey = await resolveApiKey()
+      if (!apiKey) {
+        return { ok: false, error: 'Missing LLM_API_KEY. Set LLM_API_KEY or DEEPSEEK_API_KEY credential.' }
+      }
+      const instruction =
+        typeof args.instruction === 'string' && args.instruction.trim()
+          ? args.instruction.trim()
+          : undefined
+      const context =
+        typeof args.context === 'string' && args.context.trim()
+          ? args.context.trim()
+          : undefined
+      const result = await polishPrompt({
+        text,
+        instruction,
+        context,
+        apiKey,
+        baseUrl: process.env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
+        model:
+          process.env.LLM_PROMPT_MODEL ??
+          process.env.LLM_CORE_MODEL ??
+          'deepseek-chat',
+      })
+      return { ok: true, text: result.text, feedback: result.feedback, model: result.model, usage: result.usage }
+    },
+  }))
+
 
   ctx.tools.register(defineTool({
     name: 'agent_review_last_result',
@@ -659,6 +764,55 @@ export function apply(ctx) {
           () => httpCtx.webServer.register({ kind: 'exact', path: '/plugins/agent-review-roundtable/comment', handler: commentHandler }),
           'agent-review-roundtable: comment',
         )
+
+        const polishHandler = async (req, res) => {
+          await loadProjectEnv()
+          const body = await readJsonBody(req)
+          const text = String(body.text || '').trim()
+          if (!text) {
+            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ ok: false, error: 'text is required' }))
+            return
+          }
+          const apiKey = await resolveApiKey()
+          if (!apiKey) {
+            res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ ok: false, error: 'Missing LLM_API_KEY. Set LLM_API_KEY or DEEPSEEK_API_KEY credential.' }))
+            return
+          }
+          const instruction =
+            typeof body.instruction === 'string' && body.instruction.trim()
+              ? body.instruction.trim()
+              : undefined
+          const context =
+            typeof body.context === 'string' && body.context.trim()
+              ? body.context.trim()
+              : undefined
+          try {
+            const result = await polishPrompt({
+              text,
+              instruction,
+              context,
+              apiKey,
+              baseUrl: process.env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
+              model:
+                process.env.LLM_PROMPT_MODEL ??
+                process.env.LLM_CORE_MODEL ??
+                'deepseek-chat',
+            })
+            res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ ok: true, text: result.text, feedback: result.feedback, model: result.model, usage: result.usage }))
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' })
+            res.end(JSON.stringify({ ok: false, error: message }))
+          }
+        }
+        httpCtx.effect?.(
+          () => httpCtx.webServer.register({ kind: 'exact', path: '/plugins/agent-review-roundtable/polish', handler: polishHandler }),
+          'agent-review-roundtable: polish',
+        )
+
 
         const setupStatusHandler = async (req, res) => {
           res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })

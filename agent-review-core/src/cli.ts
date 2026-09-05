@@ -10,6 +10,7 @@ import { estimateCost, formatBudgetWarning } from './budget.js';
 import { runRoundtable } from './roundtable.js';
 import { renderMarkdownReview } from './report.js';
 import { buildActionPrompt } from './actions.js';
+import { polishPrompt } from './promptPolish.js';
 import { loadProjectEnv } from './env.js';
 import type { ReviewRequest } from './types.js';
 
@@ -19,8 +20,14 @@ Usage:
   agent-review review --diff-file <file.patch> [options]
   agent-review mock --repo <path> [options]
   agent-review next --result <review.json> [options]
+  agent-review polish --prompt <text> [options]
 
 Options:
+  --prompt <text>        Prompt/draft text to improve (polish command)
+  --prompt-file <file>   Read prompt text from a UTF-8 file (polish command)
+  --instruction <text>   Optional extra instruction for polish command
+  --context <text>       Optional context/constraints for polish command
+  --feedback             Print structured prompt feedback (polish command)
   --repo <path>          Local git repository path
   --directory <path>     Review a non-git directory (snapshot pseudo-diff)
   --diff-file <path>     Read diff from a file instead of git
@@ -76,6 +83,107 @@ async function runNextCommand(
   }
 }
 
+function printPromptPolishFeedback(
+  result: import('./types.js').PromptPolishResult,
+): void {
+  const feedback = result.feedback;
+  console.log('\n=== Prompt Feedback ===');
+  if (feedback.summary) console.log(feedback.summary);
+  if (feedback.blocking.length > 0) {
+    console.log('\nBlocking:');
+    feedback.blocking.forEach((item) => console.log(`- ${item}`));
+  }
+  if (feedback.suggestions.length > 0) {
+    console.log('\nSuggestions:');
+    feedback.suggestions.forEach((item) => console.log(`- ${item}`));
+  }
+  if (feedback.risks.length > 0) {
+    console.log('\nRisks:');
+    feedback.risks.forEach((item) => console.log(`- ${item}`));
+  }
+  if (feedback.action_items.length > 0) {
+    console.log('\nAction Items:');
+    feedback.action_items.forEach((item, index) => console.log(`${index + 1}. ${item}`));
+  }
+}
+
+
+async function runPolishCommand(
+  values: Record<string, string | boolean | undefined>,
+): Promise<void> {
+  const promptText =
+    typeof values.prompt === 'string' ? values.prompt.trim() : '';
+  const promptFile =
+    typeof values['prompt-file'] === 'string' ? values['prompt-file'] : undefined;
+
+  let text = promptText;
+  if (promptFile) {
+    text = (await readFile(promptFile, 'utf8')).trim();
+  }
+  if (!text) {
+    console.error('polish command requires --prompt <text> or --prompt-file <file>');
+    process.exit(1);
+  }
+
+  const apiKey = process.env.LLM_API_KEY ?? '';
+  const baseUrl = process.env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1';
+  const model =
+    process.env.LLM_PROMPT_MODEL ??
+    process.env.LLM_CORE_MODEL ??
+    'deepseek-chat';
+  const instruction =
+    typeof values.instruction === 'string' ? values.instruction : undefined;
+  const context =
+    typeof values.context === 'string' ? values.context : undefined;
+
+  const result = await polishPrompt({
+    text,
+    instruction,
+    context,
+    apiKey,
+    baseUrl,
+    model,
+  });
+
+  if (values.feedback === true && values.json !== true) {
+    printPromptPolishFeedback(result);
+  }
+
+  const outputFile =
+    typeof values.output === 'string' ? values.output : undefined;
+  const outputJson =
+    typeof values['output-json'] === 'string' ? values['output-json'] : undefined;
+
+  if (outputJson) {
+    const outputJsonPath = await assertSafeOutputPath(
+      outputJson,
+      process.cwd(),
+      '--output-json',
+    );
+    await writeFile(outputJsonPath, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
+    if (values.json !== true) {
+      console.log(`Polished JSON written to: ${outputJsonPath}`);
+    }
+  }
+
+  if (values.json === true) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  if (outputFile) {
+    const outputPath = await assertSafeOutputPath(
+      outputFile,
+      process.cwd(),
+      '--output',
+    );
+    await writeFile(outputPath, `${result.text}\n`, 'utf8');
+    console.log(`Polished prompt written to: ${outputPath}`);
+  } else if (!outputJson) {
+    console.log(result.text);
+  }
+}
+
+
 export async function main(): Promise<void> {
   await loadProjectEnv();
 
@@ -100,6 +208,11 @@ export async function main(): Promise<void> {
         result: { type: 'string' },
         'include-blocking': { type: 'boolean', default: false },
         'include-summary': { type: 'boolean', default: false },
+      prompt: { type: 'string' },
+      'prompt-file': { type: 'string' },
+      instruction: { type: 'string' },
+      context: { type: 'string' },
+      feedback: { type: 'boolean', default: false },
       yes: { type: 'boolean', default: false },
       mock: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
@@ -113,7 +226,12 @@ export async function main(): Promise<void> {
   }
 
   const command = positionals[0];
-  if (command !== 'review' && command !== 'mock' && command !== 'next') {
+  if (
+    command !== 'review' &&
+    command !== 'mock' &&
+    command !== 'next' &&
+    command !== 'polish'
+  ) {
     console.error(`Unknown command: ${command}`);
     console.error(USAGE);
     process.exit(1);
@@ -121,6 +239,11 @@ export async function main(): Promise<void> {
 
   if (command === 'next') {
     await runNextCommand(values);
+    return;
+  }
+
+  if (command === 'polish') {
+    await runPolishCommand(values);
     return;
   }
 

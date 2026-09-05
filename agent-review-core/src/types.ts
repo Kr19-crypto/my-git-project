@@ -106,3 +106,44 @@ export interface LlmCallResult {
   text: string;
   usage: TokenUsage;
 }
+
+export interface PromptPolishInput {
+  /** Raw prompt/draft text to improve. */
+  text: string;
+  /** Optional extra instruction, e.g. "更结构化" / "面向 PowerShell 开发". */
+  instruction?: string;
+  /** Optional context that should be taken into account (repo, session, constraints). */
+  context?: string;
+}
+
+export interface PromptPolishCallOptions extends PromptPolishInput {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  /** Max output tokens for the polished prompt. Defaults to 2000. */
+  maxOutputTokens?: number;
+}
+
+export interface PromptPolishFeedback {
+  /** Overall assessment of the original prompt. */
+  summary: string;
+  /** Must-fix defects that would cause misunderstanding or failure. */
+  blocking: string[];
+  /** Non-blocking improvements. */
+  suggestions: string[];
+  /** Potential risks / missed edge cases. */
+  risks: string[];
+  /** Concrete next actions to turn the prompt into a better one. */
+  action_items: string[];
+}
+
+export interface PromptPolishResult {
+  /** Polished prompt text. */
+  text: string;
+  /** Original input text (for client-side confirmation / diff). */
+  originalText: string;
+  /** Structured feedback about the original prompt. */
+  feedback: PromptPolishFeedback;
+  model: string;
+  usage: TokenUsage;
+}

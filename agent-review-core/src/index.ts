@@ -19,6 +19,10 @@ export type {
   CostEstimate,
   LlmCallOptions,
   LlmCallResult,
+  PromptPolishInput,
+  PromptPolishCallOptions,
+  PromptPolishResult,
+  PromptPolishFeedback,
 } from './types.js';
 
 // Defaults & config
@@ -29,6 +33,13 @@ export { applyRoleModelRouting, createConfig, loadRoles } from './config.js';
 export { loadProjectEnv } from './env.js';
 export { loadDiff } from './diff.js';
 export { loadRepoContext } from './context.js';
+
+// Prompt polish / auxiliary prompt improvement
+export {
+  PROMPT_POLISH_SYSTEM_PROMPT,
+  buildPromptPolishUserMessage,
+  polishPrompt,
+} from './promptPolish.js';
 
 // Budget & reporting
 export { roughTokens, estimateCost, formatBudgetWarning } from './budget.js';

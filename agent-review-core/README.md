@@ -13,6 +13,7 @@
 - 输出结构化 Review：summary / blocking / suggestions / risks / action_items；
 - 支持 Markdown 报告输出与 JSON 输出；
 - 支持 Action Items 回灌为下一步开发指令；
+- 内置“辅助提示词改进”（Prompt Polish）：CLI/SDK/DSH 输入框均可对草稿给出结构化反馈，并润色成更清晰、可执行的提示词；
 - 支持 `--interactive` 人类中途控制（继续/跳过/中止）；
 - 提供单文件 Web UI 报告查看器；
 - 内置 Token 粗估与硬上限；
@@ -166,6 +167,26 @@ node dist/cli.js review --diff-file samples\aurora.patch --rounds 2 --budget 120
 
 交互时：`Enter` 继续，`S` 跳过当前角色，`A` 中止评审。
 
+### 辅助提示词改进（Prompt Polish）
+
+对草稿同时给出**结构化反馈**（summary / blocking / suggestions / risks / action_items）和**改进后的提示词**：
+
+```bash
+node dist/cli.js polish --prompt "帮我把这个命令做成悬浮窗" --feedback
+```
+
+默认只输出改进后的提示词便于复制；想看反馈加 `--feedback`，或使用 `--json` 获取完整结构：
+
+```bash
+node dist/cli.js polish --prompt-file samples\raw-prompt.txt --context "Windows 11 / .NET Framework 4.6+" --output polished-prompt.md
+node dist/cli.js polish --prompt "..." --feedback
+node dist/cli.js polish --prompt "..." --json
+node dist/cli.js polish --prompt "..." --json --output-json samples\prompt-polish-demo.json
+```
+
+模型优先级：`LLM_PROMPT_MODEL` > `LLM_CORE_MODEL` > `deepseek-chat`。
+
+
 ### Web UI 报告查看器
 
 提供一个零依赖的单文件 UI，可直接查看评审报告并复制回灌指令：
@@ -215,6 +236,7 @@ agent_review_roundtable
 已注册工具：
 
 - `agent_review_roundtable`
+- `agent_review_polish_prompt`
 - `agent_review_last_result`
 - `agent_review_send_comment`
 - `agent_review_pause_channel`
@@ -260,6 +282,7 @@ http://127.0.0.1:3080/plugins/agent-review-roundtable/progress.html
 - 评审结果区：自动展示 Summary、Blocking、Action Items；
 - 控制按钮：暂停、恢复、复制回灌指令、复制 JSON、清空进度；
 - Channel 评论输入：可直接给当前 channel 发送评论；
+- 输入框右侧还有 **“✨ 润色”** 按钮：把当前草稿 POST 到本插件 `/polish`，返回的改进提示词会写回输入框，并把结构化反馈显示到 Review Console（“辅助提示词改进”）；
 - 评审完成后，输入框右侧会出现 **“↩️ 回灌”** 按钮，点击后会把最近一次评审的 Action Items 写入输入框。
 - **设置（⚙️）**：可随时配置全局 API Key / 供应商 / 默认模型，也可单独为每个角色（架构/安全/测试/维护者）指定模型与供应商（Base URL）；角色级配置会写入 `agent-review-core/.env`（`LLM_ROLE_<ID>_MODEL` / `LLM_ROLE_<ID>_BASE_URL`），重启后仍生效并与 CLI 共用；已移除首次启动自动弹窗。
 
@@ -284,6 +307,7 @@ npm run review -- --repo <path> --roles config/my-roles.json --yes
 | `LLM_API_KEY` | 空 | 调用 LLM API 的 key |
 | `LLM_BASE_URL` | `https://api.deepseek.com/v1` | OpenAI-compatible base URL |
 | `LLM_CORE_MODEL` | 空 | 覆盖所有 `tier: core` 角色（架构/安全/维护者） |
+| `LLM_PROMPT_MODEL` | 空 | Prompt Polish/辅助提示词改进专用模型，优先级高于 `LLM_CORE_MODEL` |
 | `LLM_AUX_MODEL` | 空 | 覆盖所有 `tier: aux` 角色（测试等辅助角色） |
 | `LLM_ROLE_<ROLE_ID>_MODEL` | 空 | 单角色覆盖，优先级最高，如 `LLM_ROLE_ARCHITECT_MODEL` |
 | `LLM_ROLE_<ROLE_ID>_BASE_URL` | 空 | 单角色供应商 Base URL 覆盖（角色级供应商），如 `LLM_ROLE_ARCHITECT_BASE_URL=https://openrouter.ai/api/v1` |
@@ -297,6 +321,7 @@ LLM_API_KEY=你的 key
 LLM_BASE_URL=https://api.deepseek.com/v1
 LLM_CORE_MODEL=deepseek-reasoner
 LLM_AUX_MODEL=deepseek-chat
+LLM_PROMPT_MODEL=deepseek-chat  # 可选：辅助提示词改进专用模型
 LLM_ROLE_ARCHITECT_MODEL=deepseek-reasoner  # 可选：单角色模型覆盖
 LLM_ROLE_ARCHITECT_BASE_URL=https://api.deepseek.com/v1  # 可选：单角色供应商 Base URL
 ```
@@ -311,6 +336,7 @@ LLM_ROLE_ARCHITECT_BASE_URL=https://api.deepseek.com/v1  # 可选：单角色供
 - [x] 输出 Markdown review 报告
 - [x] 输出 JSON
 - [x] Action Items 回灌
+- [x] 辅助提示词改进（Prompt Polish）
 - [x] Web UI 报告查看器
 - [ ] 接入更精确 token 预估
 - [x] 基础自动化测试

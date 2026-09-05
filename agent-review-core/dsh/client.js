@@ -2,8 +2,10 @@
  * Agent Review Roundtable — DSH Web client overlay + composer backfeed.
  *
  * 1. Shows live review progress in a small fixed panel at the bottom-right.
- * 2. Registers a "↩️ 回灌" button in the DSH composer that fetches the last
- *    review action prompt from the host and writes it into the input box.
+ * 2. Registers composer buttons:
+ *    - "↩️ 回灌" fetches the last review action prompt and writes it into input;
+ *    - "✨ 润色" sends the current draft to the host /polish endpoint and writes
+ *      the improved prompt back into input.
  *
  * This file is a hand-maintained __ModuleLoader__.load bundle.
  */
@@ -19,7 +21,9 @@ window.__ModuleLoader__.load({
     var PANEL_ID = 'agent-review-roundtable-live'
     var STYLE_ID = 'agent-review-roundtable-style'
     var BACKFEED_ID = 'agent-review-roundtable-backfeed'
+    var POLISH_ID = 'agent-review-roundtable-polish'
     var LAST_RESULT_URL = '/plugins/agent-review-roundtable/last-result'
+    var POLISH_URL = '/plugins/agent-review-roundtable/polish'
     var COMMENT_URL = '/plugins/agent-review-roundtable/comment'
     var currentChannel = null
     var lastClientResult = null
@@ -42,9 +46,9 @@ window.__ModuleLoader__.load({
         '#' + PANEL_ID + ' .art-empty{color:#8b93a7}',
         '#' + PANEL_ID + ' #art-events{max-height:220px;overflow:auto}',
         '#' + PANEL_ID + '[data-docked="true"] #art-events{max-height:none}',
-        '#' + BACKFEED_ID + '{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 8px;border:1px solid rgba(127,127,127,.35);border-radius:6px;background:transparent;color:inherit;font-size:12px;cursor:pointer;white-space:nowrap}',
-        '#' + BACKFEED_ID + ':hover:not(:disabled){border-color:#4a7cff;background:rgba(74,124,255,.12)}',
-        '#' + BACKFEED_ID + ':disabled{opacity:.5;cursor:not-allowed}',
+        '#' + BACKFEED_ID + ',#' + POLISH_ID + '{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 8px;border:1px solid rgba(127,127,127,.35);border-radius:6px;background:transparent;color:inherit;font-size:12px;cursor:pointer;white-space:nowrap}',
+        '#' + BACKFEED_ID + ':hover:not(:disabled),#' + POLISH_ID + ':hover:not(:disabled){border-color:#4a7cff;background:rgba(74,124,255,.12)}',
+        '#' + BACKFEED_ID + ':disabled,#' + POLISH_ID + ':disabled{opacity:.5;cursor:not-allowed}',
         '#' + PANEL_ID + ' .art-controls{display:flex;gap:6px;margin-top:8px}',
         '#' + PANEL_ID + ' .art-btn{flex:1;border:1px solid rgba(127,127,127,.35);background:transparent;color:inherit;border-radius:6px;padding:4px 6px;font-size:11px;cursor:pointer}',
         '#' + PANEL_ID + ' .art-btn:disabled{opacity:.5;cursor:not-allowed}',
@@ -362,6 +366,80 @@ window.__ModuleLoader__.load({
       )
     }
 
+      function PolishButton(props) {
+        var inputActions = props.inputActions
+        inputActionsRef = inputActions || inputActionsRef
+        var draftState = props.useInput(function (state) {
+          return state && state.draft ? state.draft : ''
+        })
+        var busyState = React.useState(false)
+        var busy = busyState[0]
+        var setBusy = busyState[1]
+        var errorState = React.useState(null)
+        var error = errorState[0]
+        var setError = errorState[1]
+        var text = (draftState || '').trim()
+        var disabled = busy || !inputActions || typeof inputActions.setDraft !== 'function' || text.length === 0
+
+        function onPolish() {
+          if (disabled) return
+          setBusy(true)
+          setError(null)
+          fetch(POLISH_URL, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: text }),
+          })
+            .then(function (res) { return res.json() })
+            .then(function (data) {
+              if (data && data.ok === true && typeof data.text === 'string' && data.text.length > 0) {
+                inputActions.setDraft(data.text)
+                var feedbackLines = []
+                var fb = data.feedback || {}
+                if (fb.summary) feedbackLines.push('总结: ' + fb.summary)
+                if (Array.isArray(fb.blocking) && fb.blocking.length) {
+                  fb.blocking.forEach(function (item) { feedbackLines.push('Blocking: ' + item) })
+                }
+                if (Array.isArray(fb.suggestions) && fb.suggestions.length) {
+                  fb.suggestions.forEach(function (item) { feedbackLines.push('建议: ' + item) })
+                }
+                if (feedbackLines.length) appendEvent('✨ 润色完成，反馈:\n' + feedbackLines.join('\n'))
+              } else {
+                setError((data && data.error) ? String(data.error) : '润色失败')
+              }
+            })
+            .catch(function (err) { setError(String(err && err.message ? err.message : err)) })
+            .finally(function () { setBusy(false) })
+        }
+
+        return React.createElement(
+          'button',
+          {
+            id: POLISH_ID,
+            type: 'button',
+            disabled: disabled,
+            onClick: onPolish,
+            title: '将当前输入润色为更清晰、更可执行的提示词（辅助提示词改进）',
+          },
+          busy ? '…' : '✨ 润色',
+          error ? React.createElement('span', { style: { color: '#e5484d', marginLeft: 4, fontSize: 11 } }, error) : null
+        )
+      }
+
+      function ComposerButtons(props) {
+        return React.createElement(
+          'span',
+          { style: { display: 'inline-flex', alignItems: 'center', gap: '4px' } },
+          React.createElement(BackfeedButton, { inputActions: props.inputActions }),
+          React.createElement(PolishButton, {
+            inputActions: props.inputActions,
+            useInput: props.useInput,
+          })
+        )
+      }
+
+
+
     var inject = ['slots']
 
     function roleProvider(baseUrlDefault) {
@@ -508,10 +586,13 @@ window.__ModuleLoader__.load({
               name: 'conversation.input.right',
               id: BACKFEED_ID,
               order: 500,
-              label: '评审回灌',
+              label: '评审回灌 / 润色',
             },
             function (props) {
-              return React.createElement(BackfeedButton, { inputActions: props.inputActions })
+              return React.createElement(ComposerButtons, {
+                inputActions: props.inputActions,
+                useInput: props.useInput,
+              })
             }
           )
         })

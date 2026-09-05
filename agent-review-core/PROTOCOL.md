@@ -18,6 +18,8 @@ import {
   runRoundtable,
   buildActionPrompt,
   renderMarkdownReview,
+  polishPrompt,
+  buildPromptPolishUserMessage,
 } from 'agent-review-roundtable/sdk'
 ```
 
@@ -41,6 +43,15 @@ const result = await runRoundtable(request, config, {
 const nextPrompt = buildActionPrompt(result, {
   includeBlocking: true,
   includeSummary: true,
+})
+
+// 辅助提示词改进 / Prompt Polish
+const polished = await polishPrompt({
+  text: '帮我把这个命令做成悬浮窗',
+  instruction: '面向 PowerShell，明确验收标准',
+  apiKey: process.env.LLM_API_KEY ?? '',
+  baseUrl: process.env.LLM_BASE_URL ?? 'https://api.deepseek.com/v1',
+  model: process.env.LLM_PROMPT_MODEL ?? process.env.LLM_CORE_MODEL ?? 'deepseek-chat',
 })
 ```
 
@@ -93,7 +104,41 @@ const prompt = buildActionPrompt(result, {
 | `/plugins/agent-review-roundtable/pause` | POST | 暂停指定 channel |
 | `/plugins/agent-review-roundtable/resume` | POST | 恢复指定 channel |
 | `/plugins/agent-review-roundtable/comment` | POST | 向指定 channel 发送评论 |
+| `/plugins/agent-review-roundtable/polish` | POST | 辅助提示词改进：`{ text, instruction?, context? }` → `{ ok, text, feedback, usage }` |
 | `/plugins/agent-review-roundtable/progress.html` | GET | 独立实时进度页 |
+
+### 辅助提示词改进端点
+
+`POST /plugins/agent-review-roundtable/polish`
+
+请求：
+
+```json
+{
+  "text": "帮我把这个命令做成悬浮窗",
+  "instruction": "面向 PowerShell 开发，明确验收标准",
+  "context": "Windows 11 / .NET Framework 4.6+"
+}
+```
+
+成功响应：
+
+```json
+{
+  "ok": true,
+  "text": "改进后的提示词",
+  "feedback": {
+    "summary": "原提示词目标不清，缺少验收标准。",
+    "blocking": ["没有明确运行环境", "没有定义成功标准"],
+    "suggestions": ["补充可验证的测试命令"],
+    "risks": ["可能在错误 shell 中执行"],
+    "action_items": ["补充环境与验收步骤"]
+  },
+  "model": "deepseek-chat",
+  "usage": { "inputTokens": 100, "outputTokens": 50, "totalTokens": 150 }
+}
+```
+
 
 ---
 
