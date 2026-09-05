@@ -70,9 +70,49 @@
       line-height: 1.6;
       resize: vertical;
     }
-    .empty { color: var(--muted); text-align: center; padding: 60px 0; }
+    .empty { color: var(--muted); text-align: center; padding: 40px 0; }
     .hidden { display: none; }
     #demo-hint { color: var(--muted); font-size: 13px; }
+    .guide {
+      border-left: 3px solid var(--accent);
+      line-height: 1.7;
+      font-size: 14px;
+    }
+    .guide-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+    .guide h2 { margin: 16px 0 6px; font-size: 15px; }
+    .guide h2:first-child { margin-top: 0; }
+    .guide code {
+      background: #0b0d12;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1px 6px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .guide .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 8px;
+      margin: 10px 0 4px;
+    }
+    .guide .feature {
+      background: #0b0d12;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .guide .feature strong { display: block; margin-bottom: 4px; color: var(--accent); }
+    .guide .feature span { color: var(--muted); font-size: 13px; }
+    .guide ol { margin: 6px 0 0; padding-left: 22px; }
+    .guide li { margin: 6px 0; }
   </style>
 </head>
 <body>
@@ -80,20 +120,54 @@
     <header>
       <div>
         <h1>🪑 Agent Review Roundtable</h1>
-        <div class="sub">多 Agent 圆桌评审报告查看器</div>
+        <div class="sub">多 Agent 圆桌代码评审 · 报告查看器与行动项回灌</div>
       </div>
       <div class="actions">
+        <button class="btn" id="help-btn" type="button">✕ 收起使用说明</button>
         <label class="btn" for="file-input">📂 打开 review.json</label>
         <input id="file-input" type="file" accept=".json,application/json" />
         <button class="btn" id="demo-btn">载入示例</button>
       </div>
     </header>
 
+    <div id="guide" class="card guide">
+      <div class="guide-head">
+        <h2>❓ 这是什么？</h2>
+        <button class="btn" id="guide-close-btn" type="button">知道了</button>
+      </div>
+      <p>
+        <strong>Agent Review Roundtable</strong> 是一个“多 Agent 圆桌代码评审”工具：
+        它会读取代码变更（git diff / 目录快照 / patch 文件），让
+        <strong>架构师、安全、测试、维护者</strong> 等 AI 角色轮流讨论，
+        最终生成一份结构化评审报告，包含问题、风险、改进建议和可直接执行的下一步行动项。
+      </p>
+      <div class="feature-grid">
+        <div class="feature"><strong>📥 评审代码</strong><span>用 CLI 或 DSH 对 Git 仓库、非 Git 目录或 diff 文件发起评审。</span></div>
+        <div class="feature"><strong>📋 结构化报告</strong><span>Summary / Blocking / Suggestions / Risks / Action Items 一目了然。</span></div>
+        <div class="feature"><strong>↩️ 行动项回灌</strong><span>把评审结论转成“下一步开发指令”，直接交给开发 Agent 继续处理。</span></div>
+      </div>
+
+      <h2>📖 这个页面怎么用？</h2>
+      <ol>
+        <li>先获得一份评审结果 <code>review.json</code>。你可以在项目目录执行：<br />
+          <code>node dist/cli.js review --diff-file samples/aurora.patch --yes --output-json samples/aurora.review.json</code>
+        </li>
+        <li>点击上方「📂 打开 review.json」选择该文件；没有现成文件时可点击「载入示例」立即体验。</li>
+        <li>查看评审结论、必须修复项、改进建议、风险、行动项和圆桌讨论过程。</li>
+        <li>把底部「↩️ 回灌到开发会话」中的指令复制，粘贴给开发 Agent 或开发会话，让它按行动项继续修改。</li>
+      </ol>
+      <p style="color:var(--muted);margin-bottom:0">
+        提示：本页面是“评审报告查看器 / 回灌工具”，本身不调用 LLM；生成评审报告请使用 CLI 或 DSH 插件。
+      </p>
+    </div>
+
     <div id="meta" class="meta hidden"></div>
 
     <div id="empty" class="empty">
       <div style="font-size:40px">📄</div>
-      <p>打开评审 JSON 文件或点击「载入示例」</p>
+      <p><strong>还没有评审报告</strong></p>
+      <p>打开 <code>review.json</code> 文件，或点击「载入示例」查看一份真实的多 Agent 圆桌评审结果。</p>
+      <p>不知道怎么生成 review.json？请看上方「📖 使用说明」。</p>
       <p id="demo-hint">示例文件：samples/aurora-context.review.json</p>
     </div>
 
@@ -148,8 +222,19 @@
 
   <script>
     let currentReview = null;
+    let guideVisible = true;
 
     const $ = (id) => document.getElementById(id);
+
+    function setGuide(visible) {
+      guideVisible = visible;
+      const guide = $('guide');
+      const helpBtn = $('help-btn');
+      if (guide) guide.classList.toggle('hidden', !visible);
+      if (helpBtn) {
+        helpBtn.textContent = visible ? '✕ 收起使用说明' : '📖 使用说明';
+      }
+    }
 
     function buildBackfeed() {
       if (!currentReview) return '';
@@ -181,6 +266,7 @@
 
     function renderReview(review) {
       currentReview = review;
+      setGuide(false);
       $('empty').classList.add('hidden');
       $('content').classList.remove('hidden');
       $('meta').classList.remove('hidden');
@@ -283,6 +369,11 @@
         $('backfeed').value = buildBackfeed();
       });
     });
+
+    const helpBtn = $('help-btn');
+    const guideCloseBtn = $('guide-close-btn');
+    if (helpBtn) helpBtn.addEventListener('click', () => setGuide(!guideVisible));
+    if (guideCloseBtn) guideCloseBtn.addEventListener('click', () => setGuide(false));
   </script>
 </body>
 </html>

@@ -204,6 +204,8 @@ http://localhost:8080/web/index.html
 
 也可以直接双击打开 `web/index.html`，点击“打开 review.json”手动选择 `samples/aurora-context.review.json`。
 
+页面内置 **功能简介 / 使用说明**：首次打开会展示“这是什么 / 怎么用 / 回灌到开发会话”引导，也可以点击顶部“📖 使用说明”随时展开或收起。
+
 
 ### DSH 插件适配器（实验）
 
@@ -216,7 +218,7 @@ npm run build
 安装到 DSH profile：
 
 ```bash
-dsh plugin --profile web add D:\WORK AREA\HACK-Blue-Fat-Fish\agent-review-core
+dsh plugin --profile web add D:\WORK AREA\my-git-project\agent-review-core
 ```
 
 安装后，在 DSH 会话里可以要求 Agent：
@@ -276,8 +278,10 @@ http://127.0.0.1:3080/plugins/agent-review-roundtable/progress.html
 另外插件包含 **DSH Web 客户端浮层/可停靠侧边栏（Review Console）**：安装/更新后刷新 DSH Web 页面，右下角会出现面板。
 
 - 可停靠/移动/调宽/关闭；
+- 顶部 **“📖”** 按钮：打开面板内置的“功能简介 / 使用说明”；
 - 顶部启动栏：输入仓库路径或 `.patch` 路径，点击 **“🚀 启动评审”** 会把评审指令写入 DSH 输入框；
 - 实时进度事件；
+- 角色发言时，用虚拟形象（`dsh/avatar.svg`）展示当前发言核心，并可拖拽右下角自由调整形象大小；
 - 状态栏：显示 channel / 当前角色 / 当前轮次；
 - 评审结果区：自动展示 Summary、Blocking、Action Items；
 - 控制按钮：暂停、恢复、复制回灌指令、复制 JSON、清空进度；

@@ -912,6 +912,28 @@ export function apply(ctx) {
         }),
         'agent-review-roundtable: progress page',
       )
+
+      httpCtx.effect?.(
+        () => httpCtx.webServer.register({
+          kind: 'exact',
+          path: '/plugins/agent-review-roundtable/avatar.svg',
+          handler: async (req, res) => {
+            try {
+              const svg = await readFile(new URL('./avatar.svg', import.meta.url))
+              res.writeHead(200, {
+                'content-type': 'image/svg+xml; charset=utf-8',
+                'cache-control': 'public, max-age=3600',
+              })
+              res.end(svg)
+            } catch (err) {
+              res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+              res.end('avatar.svg not found')
+            }
+          },
+        }),
+        'agent-review-roundtable: avatar',
+      )
+
     })
   }
 

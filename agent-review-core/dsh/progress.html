@@ -14,6 +14,64 @@
     }
     h1 { font-size: 20px; }
     .status { color: #8b93a7; font-size: 14px; }
+    .avatar {
+      display: none;
+      align-items: center;
+      gap: 14px;
+      margin-top: 12px;
+      padding: 12px 14px;
+      border: 1px solid #2a3242;
+      background: #161b26;
+      border-radius: 14px;
+    }
+    .avatar.active { display: flex; }
+    .avatar-figure {
+      position: relative;
+      flex: 0 0 auto;
+      width: 86px;
+      height: 150px;
+      min-width: 50px;
+      min-height: 80px;
+      max-width: 180px;
+      max-height: 300px;
+    }
+    .avatar img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      object-position: center bottom;
+      background: rgba(255,255,255,.06);
+      border-radius: 12px;
+      animation: avatarFloat 1.4s ease-in-out infinite alternate;
+      pointer-events: none;
+    }
+    .avatar-resize {
+      position: absolute;
+      right: -3px;
+      bottom: -3px;
+      width: 18px;
+      height: 18px;
+      cursor: nwse-resize;
+      touch-action: none;
+      border-right: 3px solid rgba(255,255,255,.8);
+      border-bottom: 3px solid rgba(255,255,255,.8);
+      border-radius: 0 0 8px 0;
+      opacity: .9;
+    }
+    .avatar-resize:hover { border-color: #4a7cff; }
+    .avatar-body { min-width: 0; }
+    .avatar-role { font-weight: 700; margin-bottom: 4px; }
+    .avatar-text {
+      font-size: 13px;
+      line-height: 1.6;
+      color: #c7cdd9;
+      white-space: pre-wrap;
+    }
+    @keyframes avatarFloat {
+      from { transform: translateY(1px) scale(.99); }
+      to { transform: translateY(-4px) scale(1.03); }
+    }
     .event {
       border: 1px solid #262b36;
       background: #171a21;
@@ -29,17 +87,80 @@
 <body>
   <h1>🪑 Agent Review Roundtable Live</h1>
   <div class="status" id="status">等待评审事件…</div>
+  <div class="avatar" id="avatar">
+    <div class="avatar-figure" id="avatar-figure">
+      <img src="/plugins/agent-review-roundtable/avatar.svg" alt="评审虚拟形象" draggable="false" />
+      <span class="avatar-resize" id="avatar-resize" title="拖拽右下角自由调整虚拟形象大小"></span>
+    </div>
+    <div class="avatar-body">
+      <div class="avatar-role" id="avatar-role">AI 评审角色</div>
+      <div class="avatar-text" id="avatar-text">正在等待发言…</div>
+    </div>
+  </div>
   <div id="events"></div>
   <script>
     const eventsEl = document.getElementById('events');
     const statusEl = document.getElementById('status');
+    const avatarEl = document.getElementById('avatar');
+    const avatarRoleEl = document.getElementById('avatar-role');
+    const avatarTextEl = document.getElementById('avatar-text');
+    const avatarFigure = document.getElementById('avatar-figure');
+    const avatarResize = document.getElementById('avatar-resize');
+
+    function hideAvatar() {
+      avatarEl.classList.remove('active');
+    }
+
+    function coreText(raw, role) {
+      let text = raw || '';
+      const prefix = role ? role + '：' : '';
+      if (prefix && text.indexOf(prefix) === 0) text = text.slice(prefix.length);
+      text = text.replace(/\s+/g, ' ').trim();
+      if (text.length > 200) text = text.slice(0, 200) + '…';
+      return text;
+    }
+
+    function showAvatar(role, rawText) {
+      avatarRoleEl.textContent = role || 'AI 评审角色';
+      avatarTextEl.textContent = rawText ? coreText(rawText, role) : '正在思考…';
+      avatarEl.classList.add('active');
+    }
 
     function append(text) {
       const div = document.createElement('div');
+
+
       div.className = 'event';
       div.textContent = text;
       eventsEl.prepend(div);
     }
+
+    function initAvatarResize() {
+      if (!avatarFigure || !avatarResize) return;
+      avatarResize.addEventListener('pointerdown', (downEv) => {
+        downEv.preventDefault();
+        const startY = downEv.clientY;
+        const startWidth = avatarFigure.offsetWidth;
+        const startHeight = avatarFigure.offsetHeight;
+        const ratio = startHeight > 0 ? startWidth / startHeight : 0.57;
+        function onMove(moveEv) {
+          let nextHeight = startHeight + (moveEv.clientY - startY);
+          nextHeight = Math.min(300, Math.max(80, nextHeight));
+          let nextWidth = Math.round(nextHeight * ratio);
+          nextWidth = Math.min(180, Math.max(50, nextWidth));
+          avatarFigure.style.width = nextWidth + 'px';
+          avatarFigure.style.height = nextHeight + 'px';
+        }
+        function onUp() {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+        }
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+      });
+    }
+    initAvatarResize();
+
 
     const es = new EventSource('/plugins/agent-review-roundtable/events');
     es.onopen = () => { statusEl.textContent = '已连接实时进度'; };
@@ -47,7 +168,11 @@
       let data;
       try { data = JSON.parse(e.data); } catch { return; }
       statusEl.textContent = data.type || 'event';
-      append((data.time ? new Date(data.time).toLocaleTimeString() + ' ' : '') + (data.text || JSON.stringify(data)));
+      const label = (data.time ? new Date(data.time).toLocaleTimeString() + ' ' : '') + (data.text || JSON.stringify(data));
+      if (data.type === 'role_start') showAvatar(data.role, '');
+      else if (data.type === 'role_speech') showAvatar(data.role, data.text);
+      else if (data.type === 'done' || data.type === 'error') hideAvatar();
+      append(label);
     };
     es.onerror = () => { statusEl.textContent = '连接断开/等待下个任务'; };
   </script>

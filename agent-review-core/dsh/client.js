@@ -22,12 +22,17 @@ window.__ModuleLoader__.load({
     var STYLE_ID = 'agent-review-roundtable-style'
     var BACKFEED_ID = 'agent-review-roundtable-backfeed'
     var POLISH_ID = 'agent-review-roundtable-polish'
+    var MANUAL_ID = 'agent-review-roundtable-manual'
+    var AVATAR_ID = 'agent-review-roundtable-avatar'
+    var AVATAR_URL = '/plugins/agent-review-roundtable/avatar.svg'
     var LAST_RESULT_URL = '/plugins/agent-review-roundtable/last-result'
     var POLISH_URL = '/plugins/agent-review-roundtable/polish'
     var COMMENT_URL = '/plugins/agent-review-roundtable/comment'
     var currentChannel = null
     var lastClientResult = null
     var inputActionsRef = null
+    var avatarSizeHeight = 100
+    var avatarSizeRatio = 0.57
 
     function ensureStyle() {
       if (document.getElementById(STYLE_ID)) return
@@ -62,7 +67,29 @@ window.__ModuleLoader__.load({
         '#' + PANEL_ID + ' .art-result h4{margin:0 0 6px}',
         '#' + PANEL_ID + ' .art-result .art-summary{white-space:pre-wrap;margin-bottom:6px}',
         '#' + PANEL_ID + ' .art-comment{display:flex;gap:6px;padding:6px 8px}',
-        '#' + PANEL_ID + ' .art-comment input{flex:1;min-width:0;background:#0b0d12;border:1px solid rgba(127,127,127,.3);border-radius:6px;color:inherit;padding:4px 6px;font-size:12px}'
+        '#' + PANEL_ID + ' .art-comment input{flex:1;min-width:0;background:#0b0d12;border:1px solid rgba(127,127,127,.3);border-radius:6px;color:inherit;padding:4px 6px;font-size:12px}',
+        '#' + AVATAR_ID + '{display:none;align-items:center;gap:10px;margin:8px 0;padding:8px 10px;border:1px solid rgba(127,127,127,.3);border-radius:12px;background:rgba(255,255,255,.04)}',
+        '#' + AVATAR_ID + '[data-active="true"]{display:flex}',
+        '#' + AVATAR_ID + ' .art-avatar-figure{position:relative;flex:0 0 auto;width:57px;height:100px;min-width:36px;min-height:64px;max-width:140px;max-height:220px}',
+        '#' + AVATAR_ID + ' .art-avatar-img{display:block;width:100%;height:100%;object-fit:contain;object-position:center bottom;filter:drop-shadow(0 4px 8px rgba(0,0,0,.4));animation:artAvatarFloat 1.4s ease-in-out infinite alternate;pointer-events:none}',
+        '#' + AVATAR_ID + ' .art-avatar-resize{position:absolute;right:-2px;bottom:-2px;width:14px;height:14px;cursor:nwse-resize;touch-action:none;border-right:2px solid rgba(255,255,255,.75);border-bottom:2px solid rgba(255,255,255,.75);border-radius:0 0 6px 0;opacity:.85}',
+        '#' + AVATAR_ID + ' .art-avatar-resize:hover{opacity:1;border-color:#4a7cff}',
+        '#' + AVATAR_ID + ' .art-avatar-body{min-width:0;flex:1}',
+        '#' + AVATAR_ID + ' .art-avatar-role{font-weight:700;margin-bottom:2px;color:#e6e9f0}',
+        '#' + AVATAR_ID + ' .art-avatar-text{font-size:11px;line-height:1.5;color:#b9c1cf;white-space:pre-wrap;max-height:76px;overflow:hidden}',
+        '@keyframes artAvatarFloat{from{transform:translateY(1px) scale(.99)}to{transform:translateY(-3px) scale(1.02)}}',
+        '#' + MANUAL_ID + '{position:fixed;inset:0;z-index:2147483100;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);padding:16px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}',
+        '#' + MANUAL_ID + '[data-open="true"]{display:flex}',
+        '#' + MANUAL_ID + ' .art-manual-box{background:#171a21;color:#e6e9f0;border:1px solid rgba(127,127,127,.35);border-radius:12px;padding:18px 20px;max-width:560px;max-height:80vh;overflow:auto;line-height:1.65;font-size:13px;box-shadow:0 20px 60px rgba(0,0,0,.45)}',
+        '#' + MANUAL_ID + ' .art-manual-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}',
+        '#' + MANUAL_ID + ' h3{margin:0;font-size:16px}',
+        '#' + MANUAL_ID + ' h4{margin:14px 0 6px;font-size:13px}',
+        '#' + MANUAL_ID + ' p{margin:6px 0}',
+        '#' + MANUAL_ID + ' ol,#' + MANUAL_ID + ' ul{margin:6px 0;padding-left:22px}',
+        '#' + MANUAL_ID + ' li{margin:5px 0}',
+        '#' + MANUAL_ID + ' code{background:#0b0d12;border:1px solid rgba(127,127,127,.25);border-radius:5px;padding:1px 5px;font-family:ui-monospace,Consolas,monospace;font-size:12px;overflow-wrap:anywhere}',
+        '#' + MANUAL_ID + ' .art-manual-note{color:#8b93a7;font-size:12px}',
+        '#' + MANUAL_ID + ' .art-close-btn{border:1px solid rgba(127,127,127,.35);background:transparent;color:inherit;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer}'
       ].join('')
       document.head.appendChild(style)
     }
@@ -73,7 +100,7 @@ window.__ModuleLoader__.load({
       panel = document.createElement('div')
       panel.id = PANEL_ID
       panel.setAttribute('data-active', 'false')
-      panel.innerHTML = '<div id="art-resize" class="art-resize-handle"></div><div class="art-header"><span class="art-title">🪑 Agent Review Roundtable</span><span style="display:inline-flex;gap:6px"><button id="art-dock-toggle" class="art-dock-btn" title="停靠/浮层切换">📌 停靠</button><button id="art-settings-btn" class="art-dock-btn" title="设置 API Key / 供应商 / 角色模型">⚙️</button><button id="art-close-btn" class="art-close-btn" title="关闭面板">✕</button></span></div><div id="art-status" class="art-status">等待评审任务…</div><div class="art-launch"><input id="art-launch-input" placeholder="仓库路径 或 .patch 文件路径" /><button id="art-launch-btn" class="art-btn">🚀 启动评审</button></div><div id="art-events"><div class="art-empty">等待评审任务…</div></div><div id="art-result" class="art-result" style="display:none"></div><div class="art-controls" style="display:none"><button id="art-pause" class="art-btn">⏸ 暂停</button><button id="art-resume" class="art-btn">▶ 恢复</button><button id="art-copy-action" class="art-btn" disabled>复制回灌</button><button id="art-copy-json" class="art-btn" disabled>复制 JSON</button><button id="art-clear" class="art-btn">清空</button></div><div class="art-comment"><input id="art-comment-input" placeholder="给当前 channel 发评论…" disabled /><button id="art-comment-send" class="art-btn" disabled>发送</button></div>'
+      panel.innerHTML = '<div id="art-resize" class="art-resize-handle"></div><div class="art-header"><span class="art-title">🪑 Agent Review Roundtable</span><span style="display:inline-flex;gap:6px"><button id="art-help-btn" class="art-dock-btn" title="功能简介 / 使用说明">📖</button><button id="art-dock-toggle" class="art-dock-btn" title="停靠/浮层切换">📌 停靠</button><button id="art-settings-btn" class="art-dock-btn" title="设置 API Key / 供应商 / 角色模型">⚙️</button><button id="art-close-btn" class="art-close-btn" title="关闭面板">✕</button></span></div><div id="art-status" class="art-status">等待评审任务…</div><div class="art-launch"><input id="art-launch-input" placeholder="仓库路径 或 .patch 文件路径" /><button id="art-launch-btn" class="art-btn">🚀 启动评审</button></div><div id="' + AVATAR_ID + '"></div><div id="art-events"><div class="art-empty">等待评审任务…</div></div><div id="art-result" class="art-result" style="display:none"></div><div class="art-controls" style="display:none"><button id="art-pause" class="art-btn">⏸ 暂停</button><button id="art-resume" class="art-btn">▶ 恢复</button><button id="art-copy-action" class="art-btn" disabled>复制回灌</button><button id="art-copy-json" class="art-btn" disabled>复制 JSON</button><button id="art-clear" class="art-btn">清空</button></div><div class="art-comment"><input id="art-comment-input" placeholder="给当前 channel 发评论…" disabled /><button id="art-comment-send" class="art-btn" disabled>发送</button></div>'
       document.body.appendChild(panel)
         try {
           var ambient = localStorage.getItem('dsh.ambient.background') || ''
@@ -81,6 +108,49 @@ window.__ModuleLoader__.load({
         } catch (e) {}
 
       return panel
+    }
+
+    function ensureManual() {
+      var manual = document.getElementById(MANUAL_ID)
+      if (manual) return manual
+      manual = document.createElement('div')
+      manual.id = MANUAL_ID
+      manual.innerHTML =
+        '<div class="art-manual-box">' +
+        '<div class="art-manual-header"><h3>🪑 Agent Review Roundtable 功能简介 / 使用说明</h3><button id="art-manual-close" class="art-close-btn" type="button">✕</button></div>' +
+        '<p><strong>这是什么？</strong> 它用多个 AI 角色（架构师 / 安全 / 测试 / 维护者）对代码 diff 做“圆桌评审”，输出结构化问题清单与下一步行动项。</p>' +
+        '<h4>📥 这个面板怎么用？</h4>' +
+        '<ol>' +
+        '<li>在上方输入框中填写本地 <code>git 仓库路径</code> 或 <code>.patch/.diff 文件路径</code>；</li>' +
+        '<li>点击 <strong>🚀 启动评审</strong>，面板会把评审指令写入 DSH 输入框；</li>' +
+        '<li>发送该指令，Agent 会调用 <code>agent_review_roundtable</code> 执行评审；</li>' +
+        '<li>面板实时显示评审进度；完成后可 <strong>复制回灌</strong> / <strong>复制 JSON</strong>。</li>' +
+        '</ol>' +
+        '<h4>✨ 还能做什么？</h4>' +
+        '<ul>' +
+        '<li><strong>✨ 润色</strong>：把当前草稿提示词改得更清晰、可执行（输入框右侧按钮）。</li>' +
+        '<li><strong>↩️ 回灌</strong>：评审完成后，把 Action Items 一键写回 DSH 输入框（输入框右侧按钮）。</li>' +
+        '<li><strong>⚙️ 设置</strong>：配置 API Key、供应商、默认模型或各角色模型。</li>' +
+        '<li><strong>⏸ 暂停 / ▶ 恢复 / 💬 评论</strong>：用于多会话 A/B 协作评审。</li>' +
+        '</ul>' +
+        '<p class="art-manual-note">提示：没有 LLM API Key 时，可先用 <code>⚙️</code> 设置；命令行用户也可以直接运行 <code>node dist/cli.js review --repo &lt;路径&gt; --yes</code>。</p>' +
+        '</div>'
+      document.body.appendChild(manual)
+      var closeBtn = document.getElementById('art-manual-close')
+      if (closeBtn) closeBtn.addEventListener('click', hideManual)
+      manual.addEventListener('click', function (e) {
+        if (e.target === manual) hideManual()
+      })
+      return manual
+    }
+
+    function showManual() {
+      ensureManual().setAttribute('data-open', 'true')
+    }
+
+    function hideManual() {
+      var manual = document.getElementById(MANUAL_ID)
+      if (manual) manual.setAttribute('data-open', 'false')
     }
 
     function appendEvent(text) {
@@ -100,6 +170,87 @@ window.__ModuleLoader__.load({
         else break
       }
     }
+
+    function hideAvatar() {
+      var el = document.getElementById(AVATAR_ID)
+      if (el) el.setAttribute('data-active', 'false')
+    }
+
+    function avatarCoreText(raw, role) {
+      var text = raw || ''
+      var prefix = role ? role + '：' : ''
+      if (prefix && text.indexOf(prefix) === 0) text = text.slice(prefix.length)
+      text = text.replace(/\s+/g, ' ').trim()
+      if (text.length > 160) text = text.slice(0, 160) + '…'
+      return text
+    }
+
+    function showAvatar(role, rawText) {
+      var el = document.getElementById(AVATAR_ID)
+      if (!el) return
+      el.innerHTML = ''
+      el.setAttribute('data-active', 'true')
+      var figure = document.createElement('div')
+      figure.className = 'art-avatar-figure'
+      var img = document.createElement('img')
+      img.className = 'art-avatar-img'
+      img.src = AVATAR_URL
+      img.alt = role || 'AI 评审角色'
+      img.draggable = false
+      var handle = document.createElement('span')
+      handle.className = 'art-avatar-resize'
+      handle.title = '拖拽右下角自由调整虚拟形象大小'
+      figure.appendChild(img)
+      figure.appendChild(handle)
+      figure.style.height = avatarSizeHeight + 'px'
+      figure.style.width = Math.round(avatarSizeHeight * avatarSizeRatio) + 'px'
+      var body = document.createElement('div')
+      body.className = 'art-avatar-body'
+      var roleDiv = document.createElement('div')
+      roleDiv.className = 'art-avatar-role'
+      roleDiv.textContent = role || 'AI 评审角色'
+      var textDiv = document.createElement('div')
+      textDiv.className = 'art-avatar-text'
+      textDiv.textContent = rawText ? avatarCoreText(rawText, role) : '正在思考…'
+      body.appendChild(roleDiv)
+      body.appendChild(textDiv)
+      el.appendChild(figure)
+      el.appendChild(body)
+      makeAvatarResizable(figure)
+    }
+
+    function makeAvatarResizable(figure) {
+      if (!figure || figure.getAttribute('data-resizable') === 'true') return
+      figure.setAttribute('data-resizable', 'true')
+      var handle = figure.querySelector('.art-avatar-resize')
+      if (!handle) return
+      handle.addEventListener('pointerdown', function (downEv) {
+        downEv.preventDefault()
+        downEv.stopPropagation()
+        var startY = downEv.clientY
+        var startWidth = figure.offsetWidth
+        var startHeight = figure.offsetHeight
+        var ratio = startHeight > 0 ? startWidth / startHeight : 0.57
+
+        function onMove(moveEv) {
+          var nextHeight = startHeight + (moveEv.clientY - startY)
+          nextHeight = Math.min(220, Math.max(60, nextHeight))
+          var nextWidth = Math.round(nextHeight * ratio)
+          nextWidth = Math.min(140, Math.max(36, nextWidth))
+          figure.style.width = nextWidth + 'px'
+          figure.style.height = nextHeight + 'px'
+          avatarSizeHeight = nextHeight
+          avatarSizeRatio = nextWidth / nextHeight
+        }
+        function onUp() {
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+        }
+        window.addEventListener('pointermove', onMove)
+        window.addEventListener('pointerup', onUp)
+      })
+    }
+
 
     function setStatus(text) {
       var el = document.getElementById('art-status')
@@ -192,6 +343,7 @@ window.__ModuleLoader__.load({
         container.appendChild(empty)
       }
       panel.setAttribute('data-active', 'false')
+      hideAvatar()
       currentChannel = null
       updateControls()
     }
@@ -522,8 +674,21 @@ window.__ModuleLoader__.load({
           if (data.type === 'done' || data.type === 'error') {
             // Review finished or failed: hide pause/resume so a stale channel
             // cannot be paused afterwards and stall the next review on it.
+            hideAvatar()
             appendEvent(label)
             currentChannel = null
+            updateControls()
+            return
+          }
+          if (data.type === 'role_start') {
+            showAvatar(data.role || 'AI 评审角色', '')
+            appendEvent(label)
+            updateControls()
+            return
+          }
+          if (data.type === 'role_speech') {
+            showAvatar(data.role || 'AI 评审角色', data.text || '')
+            appendEvent(label)
             updateControls()
             return
           }
@@ -548,6 +713,8 @@ window.__ModuleLoader__.load({
         if (closeBtn) closeBtn.addEventListener('click', closePanel)
         var settingsBtn = document.getElementById('art-settings-btn')
         if (settingsBtn) settingsBtn.addEventListener('click', reconfigureSettings)
+        var helpBtn = document.getElementById('art-help-btn')
+        if (helpBtn) helpBtn.addEventListener('click', showManual)
 
         var header = ensurePanel().querySelector('.art-header')
         if (header) header.addEventListener('pointerdown', startDrag)

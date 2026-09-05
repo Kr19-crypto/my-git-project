@@ -105,6 +105,7 @@ const prompt = buildActionPrompt(result, {
 | `/plugins/agent-review-roundtable/resume` | POST | 恢复指定 channel |
 | `/plugins/agent-review-roundtable/comment` | POST | 向指定 channel 发送评论 |
 | `/plugins/agent-review-roundtable/polish` | POST | 辅助提示词改进：`{ text, instruction?, context? }` → `{ ok, text, feedback, usage }` |
+| `/plugins/agent-review-roundtable/avatar.svg` | GET | 评审虚拟形象 SVG |
 | `/plugins/agent-review-roundtable/progress.html` | GET | 独立实时进度页 |
 
 ### 辅助提示词改进端点
